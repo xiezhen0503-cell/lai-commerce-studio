@@ -17,19 +17,17 @@ type InitialContext = {
   ai: { mode: "openai" | "mock"; provider: string; model: string; configured: boolean; live: boolean };
 };
 
-type PromptResponse = {
+type WorkbenchResponse = {
   data?: {
-    spec: { id: string };
-    evaluation: { total: number; blockers: string[] };
-    explanation: { sources: string[]; confirmedFacts: string[]; missing: string[] };
-  };
-  error?: { message?: string };
-};
-
-type RunResponse = {
-  data?: {
-    artifact: { id: string; title: string; version: { content: string } };
-    run: { provider: string; model: string };
+    prompt: {
+      evaluation: { total: number; blockers: string[] };
+      explanation: { sources: string[]; confirmedFacts: string[]; missing: string[] };
+    };
+    result?: {
+      artifact: { id: string; title: string; version: { content: string } };
+      run: { provider: string; model: string };
+    };
+    bundle?: { artifactIds?: string[]; provider?: string; model?: string };
   };
   error?: { message?: string };
 };
@@ -104,26 +102,20 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
     if (!ready) return;
     setError(""); setResult(undefined); setCopied(false);
     const fullObjective = `${objective.trim()}\n目标平台：${platforms.join("、")}`;
-    setStage("正在核对商品事实");
-    const promptResponse = await fetch("/api/v1/prompts/generate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({projectId:initial.projectId,objective:fullObjective})});
-    const promptJson = await promptResponse.json() as PromptResponse;
-    if (!promptResponse.ok || !promptJson.data) { setStage(""); setError(promptJson.error?.message || "任务没有整理成功，请换一句更具体的话"); return; }
+    setStage(taskId === "bundle" ? "正在生成整套内容" : "正在核对事实并生成");
+    const response = await fetch("/api/v1/workbench/generate",{method:"POST",headers:{"content-type":"application/json","idempotency-key":`beginner-${Date.now()}`},body:JSON.stringify({projectId:initial.projectId,objective:fullObjective,task:taskId === "bundle" ? "bundle" : "single",artifactType:selectedTask.artifactType})});
+    const json = await response.json() as WorkbenchResponse;
+    setStage("");
+    if (!response.ok || !json.data) { setError(json.error?.message || "内容没有生成成功，请再试一次"); return; }
+    const prompt = json.data.prompt;
 
-    if (taskId === "bundle") {
-      setStage("正在生成整套内容");
-      const response = await fetch("/api/v1/campaigns",{method:"POST",headers:{"content-type":"application/json","idempotency-key":`beginner-${Date.now()}`},body:JSON.stringify({projectId:initial.projectId,objective:fullObjective})});
-      const json = await response.json();
-      setStage("");
-      if (!response.ok) { setError(json.error?.message || "整套内容没有生成成功"); return; }
-      const model = String(json.data?.model || initial.ai.model);
-      setResult({title:"整套活动已经整理好",content:"方案、短视频脚本、五张主图规划、图片提示词、视频分镜、视频草稿、排期和质量报告已经放进项目。价格、活动时间等高风险字段仍会等待你确认。",score:promptJson.data.evaluation.total,sources:promptJson.data.explanation.sources,facts:promptJson.data.explanation.confirmedFacts,missing:promptJson.data.explanation.missing,bundleCount:json.data?.artifactIds?.length || 0,provider:String(json.data?.provider || initial.ai.provider),model,live:model!=="mock-text-v1"});
+    if (taskId === "bundle" && json.data.bundle) {
+      const model = String(json.data.bundle.model || initial.ai.model);
+      setResult({title:"整套活动已经整理好",content:"方案、短视频脚本、五张主图规划、图片提示词、视频分镜、视频草稿、排期和质量报告已经放进项目。价格、活动时间等高风险字段仍会等待你确认。",score:prompt.evaluation.total,sources:prompt.explanation.sources,facts:prompt.explanation.confirmedFacts,missing:prompt.explanation.missing,bundleCount:json.data.bundle.artifactIds?.length || 0,provider:String(json.data.bundle.provider || initial.ai.provider),model,live:model!=="mock-text-v1"});
     } else {
-      setStage("正在生成第一版");
-      const response = await fetch("/api/v1/prompts/run",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({projectId:initial.projectId,promptSpecId:promptJson.data.spec.id,artifactType:selectedTask.artifactType})});
-      const json = await response.json() as RunResponse;
-      setStage("");
-      if (!response.ok || !json.data) { setError(json.error?.message || "内容没有生成成功，请再试一次"); return; }
-      setResult({title:json.data.artifact.title,content:json.data.artifact.version.content,score:promptJson.data.evaluation.total,sources:promptJson.data.explanation.sources,facts:promptJson.data.explanation.confirmedFacts,missing:promptJson.data.explanation.missing,artifactId:json.data.artifact.id,provider:json.data.run.provider,model:json.data.run.model,live:json.data.run.model!=="mock-text-v1"});
+      const generated = json.data.result;
+      if (!generated) { setError("内容没有生成成功，请再试一次"); return; }
+      setResult({title:generated.artifact.title,content:generated.artifact.version.content,score:prompt.evaluation.total,sources:prompt.explanation.sources,facts:prompt.explanation.confirmedFacts,missing:prompt.explanation.missing,artifactId:generated.artifact.id,provider:generated.run.provider,model:generated.run.model,live:generated.run.model!=="mock-text-v1"});
     }
     setTimeout(() => resultRef.current?.scrollIntoView({behavior:"smooth",block:"start"}),50);
   }

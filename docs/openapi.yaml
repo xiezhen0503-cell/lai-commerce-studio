@@ -96,7 +96,31 @@ paths:
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody: { $ref: '#/components/requestBodies/JsonBody' }
       responses:
+        '201': { $ref: '#/components/responses/Success' }
+        '401': { $ref: '#/components/responses/Error' }
+  /api/v1/workbench/generate:
+    post:
+      tags: [Prompts]
+      summary: 新手工作台单请求生成；适合无状态云端实例
+      description: 在同一服务端请求中完成 PromptSpec、模型运行和成果创建，避免临时 SQLite 跨实例丢失上下文。
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectId, objective]
+              properties:
+                projectId: { type: string }
+                objective: { type: string, maxLength: 500 }
+                task: { type: string, enum: [single, bundle] }
+                artifactType: { type: string }
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
         '200': { $ref: '#/components/responses/Success' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
   /api/v1/prompts/run:
     post:
       tags: [Prompts]
@@ -109,6 +133,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PromptRunEnvelope' }
+        '401': { $ref: '#/components/responses/Error' }
   /api/v1/prompts/{promptSpecId}/export:
     parameters:
       - name: promptSpecId
@@ -133,6 +158,7 @@ paths:
         '200':
           description: 幂等请求重放
           content: { application/json: { schema: { type: object, additionalProperties: true } } }
+        '401': { $ref: '#/components/responses/Error' }
   /api/v1/templates:
     get:
       tags: [Prompts]

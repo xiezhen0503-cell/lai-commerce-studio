@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: lai-commerce-studio-test
+    runtime: node
+    plan: free
+    region: singapore
+    branch: main
+    autoDeployTrigger: off
+    buildCommand: corepack enable && corepack prepare pnpm@11.19.0 --activate && pnpm install --frozen-lockfile && pnpm --filter @lai/web build
+    startCommand: pnpm --filter @lai/web exec next start -H 0.0.0.0 -p $PORT
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: DATABASE_PATH
+        value: /tmp/laicommerce.db
+      - key: LAI_TEXT_PROVIDER
+        value: auto
+      - key: OPENAI_MODEL
+        value: gpt-5.6-sol
+      - key: OPENAI_REASONING_EFFORT
+        value: low
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: WORKBENCH_ACCESS_TOKEN
+        sync: false
+      - key: AGENT_TOKEN_PEPPER
+        generateValue: true
+      - key: WEBHOOK_SECRET
+        generateValue: true

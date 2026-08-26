@@ -6,6 +6,10 @@
 
 [在 GitHub Codespaces 中打开](https://codespaces.new/xiezhen0503-cell/lai-commerce-studio?quickstart=1)，无需先在个人电脑安装项目依赖。Codespaces 创建完成后运行 `pnpm dev`。
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/xiezhen0503-cell/lai-commerce-studio)
+
+“Deploy to Render”会创建可直接分享的云端测试页面。首次部署时只把 `OPENAI_API_KEY` 和自定义的 `WORKBENCH_ACCESS_TOKEN` 填入 Render 的 Secret 表单，不要写进 GitHub。部署完成后，把 `https://你的站点.onrender.com/access/你的测试Token` 发给小赖；首次点击会写入 7 天 HttpOnly 测试凭证并自动跳转到工作台。
+
 一个新手可以直接上手、专业团队可以继续深入的中文电商 AI 工作台。默认首页只要求用户选内容类型、平台，再用一句话说明目标；商品资料、事实快照、提示词结构、风险检查和输出格式由系统自动整理。品牌、商品、来源、物料、版本、任务、评审与智能体权限仍完整保留，可通过 Web、REST、MCP 和 A2A 使用。
 
 本仓库采用 MIT 许可证开放源代码。第三方 Provider、Remotion、Dify、n8n、ComfyUI 等仍受各自许可证约束，详见[第三方许可证评估](docs/third-party-licenses.md)。
@@ -107,6 +111,8 @@ MCP 客户端使用 [`docs/examples/mcp.json`](docs/examples/mcp.json)，服务�
 ## 生产部署
 
 构建后运行 `pnpm start`。生产环境必须设置随机 `AGENT_TOKEN_PEPPER` 与 `WEBHOOK_SECRET`；启用 Codex 时再从托管平台的 Secret 配置 `OPENAI_API_KEY`。本项目包含服务端 API 和 SQLite，不能直接作为纯静态 GitHub Pages 运行。正式公开前还要接入 HTTPS/OIDC、对象存储、队列 Worker、备份、出站 allowlist 和集中审计，并删除演示 Token 与虚构数据。`docker-compose.example.yml` 只演示进程和环境变量，不是生产安全基线。
+
+仓库根目录的 `render.yaml` 用于小赖首轮云端测试：免费服务采用 `/tmp` SQLite 和单请求生成接口，实例重启后会恢复为虚构演示数据，不承诺长期保存上传资料和生成历史。免费实例闲置后可能冷启动；长期正式使用应升级持久化方案。
 
 ## 已知限制
 

@@ -4,6 +4,7 @@ import { getTextProviderStatus, MockImageProvider, MockTextProvider, MockVideoPr
 import { detectPromptInjection, redact, safeWorkspacePath, signWebhook, validateOutboundUrl, validateUpload, verifyWebhook } from "@lai/security";
 import { CommerceRepository } from "@lai/database";
 import { CommerceService, DEMO_PROJECT_ID } from "@lai/shared";
+import { isWorkbenchAccessRequired, isWorkbenchAccessTokenValid, workbenchAccessTokenFromCookieHeader } from "../../apps/web/workbench-access";
 
 describe("安全、权限和 Provider", () => {
   afterEach(() => {
@@ -89,5 +90,17 @@ describe("安全、权限和 Provider", () => {
     expect(body).toMatchObject({ model: "gpt-5.6-sol", input: "只使用已确认事实", reasoning: { effort: "low" }, store: false });
     expect(generated).toMatchObject({ text: "第一段\n\n第二段", model: "gpt-5.6-sol", tokenUsage: 321 });
     service.repo.close();
+  });
+
+  it("用专属链接 Token 保护公开工作台，但本地默认不阻断", () => {
+    vi.stubEnv("WORKBENCH_ACCESS_TOKEN", "");
+    expect(isWorkbenchAccessRequired()).toBe(false);
+    expect(isWorkbenchAccessTokenValid()).toBe(true);
+
+    vi.stubEnv("WORKBENCH_ACCESS_TOKEN", "lai-invite-2026");
+    expect(isWorkbenchAccessRequired()).toBe(true);
+    expect(isWorkbenchAccessTokenValid("lai-invite-2026")).toBe(true);
+    expect(isWorkbenchAccessTokenValid("wrong-token")).toBe(false);
+    expect(workbenchAccessTokenFromCookieHeader("theme=dark; lai_workbench_access=lai-invite-2026")).toBe("lai-invite-2026");
   });
 });

@@ -14,6 +14,10 @@ export default defineConfig({
   webServer: {
     command: "pnpm --filter @lai/web start",
     url: "http://127.0.0.1:3000/api/v1/health",
+    env: {
+      LAI_TEXT_PROVIDER: "mock",
+      WORKBENCH_ACCESS_TOKEN: "e2e-workbench-access"
+    },
     reuseExistingServer: true,
     timeout: 120_000
   }

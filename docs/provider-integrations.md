@@ -8,6 +8,8 @@ OpenAI 请求只在服务端发出，使用 `store: false`，默认推理强度�
 
 模型调用失败时不会偷偷切回 Mock，以免把演示内容冒充真实模型结果；只有“未配置密钥”的 `auto` 模式会使用 Mock。
 
+公开测试站点建议同时配置 `WORKBENCH_ACCESS_TOKEN`。用户通过 `/access/{token}` 专属链接进入后，服务端设置 7 天 HttpOnly Cookie；模型生成接口会校验该 Cookie，避免公开页面被批量消耗模型额度。这个 Token 只是测试链接凭证，不得替代正式用户登录与权限系统。
+
 ## Mock 能力
 
 MockTextProvider 生成确定性文案，MockDocumentProvider 模拟解析，MockImageProvider 返回带元数据的占位资产，MockVideoProvider 返回模板化渲染结果。它们支持种子、可重试错误和任务进度，保证无外部密钥也能测试完整流程。

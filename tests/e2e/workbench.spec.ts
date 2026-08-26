@@ -1,8 +1,22 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 
+const accessPath = "/access/e2e-workbench-access";
+
 test("新手工作台可以从一句话生成第一版内容", async ({ page }) => {
   await page.goto("/");
+  await expect(page.getByRole("heading", { name: "请使用小赖的专属测试链接" })).toBeVisible();
+  const unauthorized = await page.request.post("/api/v1/workbench/generate", {
+    data: {
+      projectId: "prj_qingmai_launch",
+      objective: "验证没有专属访问凭证时不能调用生成模型",
+      task: "single",
+      artifactType: "script"
+    }
+  });
+  expect(unauthorized.status()).toBe(401);
+
+  await page.goto(accessPath);
   await expect(page.getByRole("heading", { name: /不用学提示词/ })).toBeVisible();
   await expect(page.getByLabel("当前 AI 模型")).toContainText(/Codex|演示模式/);
   await expect(page.getByLabel("AI 内容生成工作台")).toContainText("本次使用的资料");
@@ -29,6 +43,7 @@ test("新手工作台可以从一句话生成第一版内容", async ({ page }) 
 });
 
 test("项目事实和 API 文档页面可访问", async ({ page }) => {
+  await page.goto(accessPath);
   await page.goto("/projects/prj_qingmai_launch");
   await expect(page.getByRole("heading", { name: "青麦脆夏日上新" })).toBeVisible();
   const uploadResponse = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/sources"));
