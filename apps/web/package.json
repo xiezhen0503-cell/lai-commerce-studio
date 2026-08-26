@@ -1,0 +1,36 @@
+{
+  "name": "@lai/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -H 127.0.0.1 -p 3000",
+    "build": "next build",
+    "start": "next start -H 127.0.0.1 -p 3000",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lai/database": "workspace:*",
+    "@lai/domain": "workspace:*",
+    "@lai/permissions": "workspace:*",
+    "@lai/prompt-engine": "workspace:*",
+    "@lai/providers": "workspace:*",
+    "@lai/security": "workspace:*",
+    "@lai/shared": "workspace:*",
+    "@remotion/player": "latest",
+    "clsx": "latest",
+    "lucide-react": "latest",
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "remotion": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "autoprefixer": "latest",
+    "postcss": "latest",
+    "tailwindcss": "^3.4.17",
+    "typescript": "6.0.2"
+  }
+}

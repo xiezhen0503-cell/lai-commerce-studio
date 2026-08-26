@@ -1,0 +1,5 @@
+import { getCommerceService, CommerceError } from "@lai/shared";
+import { compilePrompt } from "@lai/prompt-engine";
+import { fail } from "../../../../_lib/http";
+export const runtime="nodejs";
+export async function GET(request:Request,{params}:{params:Promise<{promptSpecId:string}>}){try{const {promptSpecId}=await params;const service=getCommerceService();const spec=service.repo.get<any>("prompt_specs",promptSpecId);if(!spec)throw new CommerceError("PROMPT_NOT_FOUND","没有找到提示词",404);const context=service.makeCompileContext(spec.projectId,spec.objective);context.spec=spec;const format=new URL(request.url).searchParams.get("format")||"md";const content=format==="json"?compilePrompt(context,"json"):compilePrompt(context,"markdown");return new Response(content,{headers:{"content-type":format==="json"?"application/json; charset=utf-8":"text/markdown; charset=utf-8","content-disposition":`attachment; filename="${promptSpecId}.${format}"`}});}catch(error){return fail(error)}}

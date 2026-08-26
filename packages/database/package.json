@@ -1,0 +1,1 @@
+{"name":"@lai/database","version":"0.1.0","private":true,"type":"module","exports":"./src/index.ts","dependencies":{"@lai/domain":"workspace:*","better-sqlite3":"latest"},"devDependencies":{"@types/better-sqlite3":"latest"}}

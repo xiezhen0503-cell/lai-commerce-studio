@@ -1,0 +1,17 @@
+{
+  "name": "LaiCommerce Studio",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
+  "postCreateCommand": "corepack enable && corepack prepare pnpm@11.19.0 --activate && pnpm install --frozen-lockfile && pnpm run app:setup",
+  "forwardPorts": [3000, 3101, 3102],
+  "portsAttributes": {
+    "3000": { "label": "LaiCommerce Web", "onAutoForward": "openPreview" },
+    "3101": { "label": "MCP Server", "onAutoForward": "notify" },
+    "3102": { "label": "A2A Server", "onAutoForward": "notify" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["dbaeumer.vscode-eslint"]
+    }
+  },
+  "remoteUser": "node"
+}

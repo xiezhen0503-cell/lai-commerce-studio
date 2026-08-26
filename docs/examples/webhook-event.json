@@ -1,0 +1,18 @@
+{
+  "headers": {
+    "content-type": "application/json",
+    "x-lai-timestamp": "2026-08-26T08:00:00.000Z",
+    "x-lai-signature": "HMAC_SHA256(timestamp.body, WEBHOOK_SECRET)"
+  },
+  "body": {
+    "id": "evt_example",
+    "event": "generation_job.needs_review",
+    "timestamp": "2026-08-26T08:00:00.000Z",
+    "payload": {
+      "projectId": "prj_qingmai_launch",
+      "jobId": "job_example",
+      "artifactIds": ["art_example"],
+      "reason": "活动价仍未确认"
+    }
+  }
+}

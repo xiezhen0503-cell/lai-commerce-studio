@@ -1,0 +1,322 @@
+openapi: 3.1.2
+info:
+  title: LaiCommerce Studio API
+  version: 0.1.0
+  description: 项目优先、事实驱动的中文电商 AI 内容生产 API。
+servers:
+  - url: http://127.0.0.1:3000
+tags:
+  - name: System
+  - name: Projects
+  - name: Sources
+  - name: Facts
+  - name: Prompts
+  - name: Campaigns
+  - name: Jobs
+  - name: Reviews
+  - name: Agents
+  - name: Tools
+paths:
+  /api/v1/health:
+    get:
+      tags: [System]
+      summary: 服务健康状态
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+  /api/v1/capabilities:
+    get:
+      tags: [System]
+      summary: 列出协议、Provider、技能和工具能力
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+  /api/v1/projects:
+    get:
+      tags: [Projects]
+      summary: 项目列表
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    post:
+      tags: [Projects]
+      summary: 创建项目
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody: { $ref: '#/components/requestBodies/JsonBody' }
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
+        '400': { $ref: '#/components/responses/Error' }
+  /api/v1/projects/{projectId}:
+    parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+    get:
+      tags: [Projects]
+      summary: 获取项目聚合视图
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/projects/{projectId}/sources:
+    parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+    post:
+      tags: [Sources]
+      summary: 上传并解析项目来源
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties: { file: { type: string, format: binary } }
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
+        '413': { $ref: '#/components/responses/Error' }
+        '415': { $ref: '#/components/responses/Error' }
+  /api/v1/projects/{projectId}/facts:
+    parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+    get:
+      tags: [Facts]
+      summary: 读取事实和快照
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+  /api/v1/projects/{projectId}/facts/{factId}/confirm:
+    parameters:
+      - { $ref: '#/components/parameters/ProjectId' }
+      - name: factId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [Facts]
+      summary: 人类确认单条事实并创建新快照
+      requestBody: { $ref: '#/components/requestBodies/JsonBody' }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/prompts/generate:
+    post:
+      tags: [Prompts]
+      summary: 生成三档 PromptSpec 并评估
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody: { $ref: '#/components/requestBodies/JsonBody' }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+  /api/v1/prompts/run:
+    post:
+      tags: [Prompts]
+      summary: 运行提示词并创建版本化产物
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody: { $ref: '#/components/requestBodies/JsonBody' }
+      responses:
+        '202': { $ref: '#/components/responses/Success' }
+  /api/v1/prompts/{promptSpecId}/export:
+    parameters:
+      - name: promptSpecId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Prompts]
+      summary: 导出通用或模型专用提示词
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+  /api/v1/campaigns:
+    post:
+      tags: [Campaigns]
+      summary: 创建整套营销战役物料
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody: { $ref: '#/components/requestBodies/JsonBody' }
+      responses:
+        '202': { $ref: '#/components/responses/Success' }
+  /api/v1/templates:
+    get:
+      tags: [Prompts]
+      summary: 模板列表
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    post:
+      tags: [Prompts]
+      summary: 将 PromptSpec 保存为模板
+      requestBody: { $ref: '#/components/requestBodies/JsonBody' }
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
+  /api/v1/handoffs:
+    post:
+      tags: [Agents]
+      summary: 创建最小权限智能体交接包
+      requestBody: { $ref: '#/components/requestBodies/JsonBody' }
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
+  /api/v1/jobs/{jobId}:
+    parameters: [{ $ref: '#/components/parameters/JobId' }]
+    get:
+      tags: [Jobs]
+      summary: 查询任务
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+  /api/v1/jobs/{jobId}/events:
+    parameters: [{ $ref: '#/components/parameters/JobId' }]
+    get:
+      tags: [Jobs]
+      summary: 订阅任务 SSE 事件
+      responses:
+        '200':
+          description: SSE stream
+          content: { text/event-stream: { schema: { type: string } } }
+  /api/v1/reviews:
+    get:
+      tags: [Reviews]
+      summary: 审核任务列表
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    post:
+      tags: [Reviews]
+      summary: 请求人工审核
+      requestBody: { $ref: '#/components/requestBodies/JsonBody' }
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
+  /api/v1/reviews/{reviewId}/decision:
+    parameters:
+      - name: reviewId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [Reviews]
+      summary: 人类批准或驳回
+      requestBody: { $ref: '#/components/requestBodies/JsonBody' }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+  /api/v1/agents/connections:
+    get:
+      tags: [Agents]
+      summary: 智能体连接列表
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    post:
+      tags: [Agents]
+      summary: 签发一次性可见 Agent Token
+      requestBody: { $ref: '#/components/requestBodies/JsonBody' }
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
+  /api/v1/agents/{agentId}/revoke:
+    parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [Agents]
+      summary: 撤销 Agent Token
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+  /api/v1/tools/{toolName}:
+    parameters:
+      - name: toolName
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [Tools]
+      summary: 用 REST 调用 MCP 同名工具
+      security: [{ BearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody: { $ref: '#/components/requestBodies/JsonBody' }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /api/v1/artifacts/{artifactId}/export:
+    parameters:
+      - name: artifactId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Campaigns]
+      summary: 导出物料当前版本
+      responses:
+        '200': { description: 文件响应 }
+  /api/v1/projects/{projectId}/artifacts/{artifactId}/versions/{versionId}/restore:
+    parameters:
+      - { $ref: '#/components/parameters/ProjectId' }
+      - name: artifactId
+        in: path
+        required: true
+        schema: { type: string }
+      - name: versionId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [Campaigns]
+      summary: 从历史内容创建新的恢复版本
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+  /api/v1/webhooks/example:
+    post:
+      tags: [System]
+      summary: 校验签名的 Webhook 示例
+      parameters:
+        - name: X-Lai-Timestamp
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-Lai-Signature
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody: { $ref: '#/components/requestBodies/JsonBody' }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '401': { $ref: '#/components/responses/Error' }
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: AgentToken
+  parameters:
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      schema: { type: string }
+    JobId:
+      name: jobId
+      in: path
+      required: true
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string, maxLength: 200 }
+  requestBodies:
+    JsonBody:
+      required: true
+      content:
+        application/json:
+          schema: { type: object, additionalProperties: true }
+  responses:
+    Success:
+      description: 成功
+      content:
+        application/json:
+          schema: { type: object, additionalProperties: true }
+    Error:
+      description: 结构化错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, traceId]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: {}
+            traceId: { type: string }

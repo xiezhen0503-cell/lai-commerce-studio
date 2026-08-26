@@ -1,0 +1,4 @@
+import { getCommerceService } from "@lai/shared";
+import { Badge, EmptyState, PageHead, statusLabel, statusTone } from "@/components/ui";
+export const dynamic="force-dynamic";
+export default function JobsPage(){const jobs=getCommerceService().repo.list<any>("generation_jobs");return <><PageHead eyebrow="Generation Jobs" title="生成任务与渲染队列" subtitle="长任务保留进度、阶段、取消、重试、失败原因与部分结果。"/>{jobs.length?<div className="card table-wrap"><table><thead><tr><th>任务</th><th>项目</th><th>阶段</th><th>进度</th><th>状态</th></tr></thead><tbody>{jobs.map(job=><tr key={job.id}><td className="mono">{job.id}</td><td>{job.projectId}</td><td>{job.stage}</td><td><div className="progress" style={{width:150}}><span style={{width:`${job.progress}%`}}/></div></td><td><Badge tone={statusTone(job.status)}>{statusLabel(job.status)}</Badge></td></tr>)}</tbody></table></div>:<EmptyState title="还没有生成任务" text="从首页一键生成整套活动，任务进度会显示在这里。"/>}</>}

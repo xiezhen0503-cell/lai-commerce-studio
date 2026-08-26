@@ -1,0 +1,48 @@
+name: Bug 报告
+description: 报告可复现的问题，请勿填写密钥或真实客户数据
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: 感谢反馈。安全漏洞请使用 GitHub Private Vulnerability Reporting，不要公开可利用细节。
+  - type: input
+    id: version
+    attributes:
+      label: 版本或提交
+      placeholder: main / commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 运行平台
+      options:
+        - macOS Apple Silicon
+        - macOS Intel
+        - Linux
+        - Windows
+        - GitHub Codespaces
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 使用虚构或脱敏数据
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为与日志
+      description: 请删除 Token、Cookie、密钥、手机号和客户信息
+    validations:
+      required: true

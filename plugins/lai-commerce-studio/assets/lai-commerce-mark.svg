@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">小赖电商工作台</title>
+  <rect width="128" height="128" rx="28" fill="#17233d"/>
+  <path d="M26 40h76l-6 50a12 12 0 0 1-12 10H44a12 12 0 0 1-12-10z" fill="#edf5ee"/>
+  <path d="M45 48V36c0-12 8-20 19-20s19 8 19 20v12" fill="none" stroke="#80c6a7" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="51" cy="70" r="7" fill="#efb866"/>
+  <circle cx="78" cy="70" r="7" fill="#efb866"/>
+  <path d="M48 85c8 7 24 7 32 0" fill="none" stroke="#17233d" stroke-width="6" stroke-linecap="round"/>
+</svg>

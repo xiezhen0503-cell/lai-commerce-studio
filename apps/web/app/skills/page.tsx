@@ -1,0 +1,4 @@
+import { SKILL_CATALOG } from "@lai/shared";
+import { Sparkles } from "lucide-react";
+import { Badge, PageHead } from "@/components/ui";
+export default function SkillsPage(){return <><PageHead eyebrow="Commerce Skills" title="电商技能中心" subtitle="17 个单一职责技能，同时供网页工作流和外部智能体调用。"/><div className="grid-3">{SKILL_CATALOG.map(skill=><div className="card card-pad" key={skill.name}><div className="row between"><div className="list-icon"><Sparkles size={16}/></div><Badge tone={skill.requiresHumanReview?"amber":"jade"}>{skill.requiresHumanReview?"需要人工复核":"可直接运行"}</Badge></div><h2 className="mono" style={{margin:"17px 0 8px",fontSize:13}}>{skill.name}</h2><p className="subtitle">{skill.description}</p><div className="list-meta" style={{marginTop:14}}>v{skill.version} · {skill.sideEffect?"会创建草稿":"只读分析"}</div></div>)}</div></>}

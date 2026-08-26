@@ -1,0 +1,1 @@
+{"name":"@lai/providers","version":"0.1.0","private":true,"type":"module","exports":"./src/index.ts","dependencies":{"@lai/domain":"workspace:*","@lai/prompt-engine":"workspace:*","@lai/security":"workspace:*"}}

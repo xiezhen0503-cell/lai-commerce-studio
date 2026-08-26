@@ -1,0 +1,4 @@
+import { getCommerceService } from "@lai/shared";
+import { Badge, EmptyState, PageHead, statusLabel, statusTone } from "@/components/ui";
+export const dynamic="force-dynamic";
+export default function ReviewsPage(){const reviews=getCommerceService().repo.list<any>("review_requests");return <><PageHead eyebrow="Human Review" title="人工审核中心" subtitle="价格、规格、活动时间、资质、功效和发布动作必须在这里由人确认。"/>{reviews.length?<div className="card table-wrap"><table><thead><tr><th>成果</th><th>风险字段</th><th>请求人</th><th>状态</th><th></th></tr></thead><tbody>{reviews.map(review=><tr key={review.id}><td className="mono">{review.artifactId}</td><td>{review.riskFields.join("、")}</td><td>{review.requestedBy}</td><td><Badge tone={statusTone(review.status)}>{statusLabel(review.status)}</Badge></td><td><button className="button primary">打开审核</button></td></tr>)}</tbody></table></div>:<EmptyState title="暂时没有待审核内容" text="成果提交审核后会出现在这里；外部智能体只能请求审核，不能批准。"/>}</>}

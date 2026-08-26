@@ -1,0 +1,5 @@
+import { getCommerceService } from "@lai/shared";
+import { FileText, Upload } from "lucide-react";
+import { Badge, PageHead, statusLabel, statusTone } from "@/components/ui";
+export const dynamic="force-dynamic";
+export default function KnowledgePage(){const sources=getCommerceService().repo.list<any>("source_documents");return <><PageHead eyebrow="Knowledge" title="资料库与来源" subtitle="上传内容始终是不可信输入；解析结果不能覆盖系统规则、权限或审核边界。" action={<button className="button primary"><Upload size={15}/>上传资料</button>}/><div className="card"><div className="card-head"><h2>项目资料</h2><span className="small muted">{sources.length} 份</span></div><div className="card-pad" style={{paddingTop:4,paddingBottom:4}}><ul className="list">{sources.map(source=><li className="list-item" key={source.id}><div className="list-icon"><FileText size={17}/></div><div className="list-copy"><div className="list-title">{source.fileName}</div><div className="list-meta">{source.mimeType} · {source.parser} · {source.size} bytes</div></div><Badge tone={statusTone(source.status)}>{statusLabel(source.status)}</Badge></li>)}</ul></div></div></>}

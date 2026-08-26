@@ -1,0 +1,14 @@
+node_modules/
+.next/
+dist/
+coverage/
+playwright-report/
+test-results/
+data/*.db
+data/*.db-*
+data/uploads/
+.env
+.DS_Store
+.firecrawl/
+*.tsbuildinfo
+*.log

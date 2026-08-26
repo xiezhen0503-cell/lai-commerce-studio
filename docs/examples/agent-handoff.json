@@ -1,0 +1,18 @@
+{
+  "handoffId": "handoff_example",
+  "taskId": "task_example",
+  "objective": "基于已确认事实快照继续生成30秒短视频脚本草稿",
+  "projectId": "prj_qingmai_launch",
+  "projectContextUri": "laicommerce://projects/prj_qingmai_launch",
+  "sourceUris": ["laicommerce://projects/prj_qingmai_launch/sources"],
+  "factSnapshotId": "snap_example",
+  "promptSpecId": "ps_example",
+  "constraints": ["只回写草稿", "不得确认事实", "不得批准或发布"],
+  "expectedOutputSchema": { "script": { "type": "string" }, "evidence": { "type": "array" } },
+  "allowedTools": ["project.get", "fact.list", "artifact.create", "review.request_human_approval"],
+  "permissionScope": ["project:read", "fact:read", "artifact:write", "artifact:review"],
+  "approvalPolicy": "always-human",
+  "createdBy": "user_lai",
+  "createdAt": "2026-08-26T08:00:00.000Z",
+  "expiresAt": "2026-08-27T08:00:00.000Z"
+}

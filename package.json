@@ -1,0 +1,40 @@
+{
+  "name": "lai-commerce-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=22 <25",
+    "pnpm": ">=11 <12"
+  },
+  "scripts": {
+    "app:setup": "tsx scripts/setup.ts",
+    "app:doctor": "tsx scripts/doctor.ts",
+    "browser:install": "playwright install chromium webkit",
+    "dev": "concurrently -n WEB,MCP,A2A -c blue,magenta,cyan \"pnpm --filter @lai/web dev\" \"pnpm --filter @lai/mcp-server dev\" \"pnpm --filter @lai/a2a-server dev\"",
+    "build": "pnpm --filter @lai/web build && pnpm --filter @lai/mcp-server build && pnpm --filter @lai/a2a-server build",
+    "start": "concurrently -n WEB,MCP,A2A \"pnpm --filter @lai/web start\" \"pnpm --filter @lai/mcp-server start\" \"pnpm --filter @lai/a2a-server start\"",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm --filter @lai/web typecheck && pnpm --filter @lai/mcp-server typecheck && pnpm --filter @lai/a2a-server typecheck",
+    "test": "vitest run --exclude 'tests/e2e/**'",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:e2e": "pnpm --filter @lai/web build && playwright test",
+    "smoke:protocols": "pnpm --filter @lai/mcp-server smoke",
+    "db:seed": "tsx scripts/seed.ts",
+    "db:reset": "tsx scripts/seed.ts --reset",
+    "check": "pnpm run app:doctor && pnpm lint && pnpm typecheck && pnpm test && pnpm build && playwright test"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.2",
+    "@playwright/test": "latest",
+    "@types/node": "latest",
+    "concurrently": "latest",
+    "eslint": "9.39.2",
+    "tsx": "latest",
+    "typescript": "6.0.2",
+    "typescript-eslint": "8.68.0",
+    "vitest": "latest"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "lai-commerce-studio",
+  "version": "0.1.0",
+  "description": "小赖电商工作台：把已确认商品事实转成可审核的提示词、营销物料和智能体交接任务。",
+  "author": {
+    "name": "LaiCommerce Studio"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "小赖电商工作台",
+    "shortDescription": "基于事实快照生产中文电商内容",
+    "longDescription": "在 Codex 中使用 17 个中文电商技能，并通过本地 MCP 服务访问项目、事实、提示词、物料、评审与交接能力。",
+    "developerName": "LaiCommerce Studio",
+    "category": "Productivity",
+    "capabilities": ["skills", "mcp"],
+    "defaultPrompt": "请先确认项目事实快照，再使用小赖电商工作台生成可追溯、可审核的电商内容；不要执行未获确认的发布或付费操作。"
+  },
+  "mcpServers": "./.mcp.json"
+}

@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "paths": {
+      "@lai/domain": ["./packages/domain/src/index.ts"],
+      "@lai/database": ["./packages/database/src/index.ts"],
+      "@lai/prompt-engine": ["./packages/prompt-engine/src/index.ts"],
+      "@lai/providers": ["./packages/providers/src/index.ts"],
+      "@lai/permissions": ["./packages/permissions/src/index.ts"],
+      "@lai/security": ["./packages/security/src/index.ts"],
+      "@lai/shared": ["./packages/shared/src/index.ts"]
+    }
+  },
+  "include": ["packages/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "vitest.config.ts", "playwright.config.ts"]
+}

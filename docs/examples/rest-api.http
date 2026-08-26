@@ -1,0 +1,24 @@
+@baseUrl = http://127.0.0.1:3000
+@token = lai_demo_agent_token
+
+### 健康检查
+GET {{baseUrl}}/api/v1/health
+
+### 读取获准项目
+POST {{baseUrl}}/api/v1/tools/project.get
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "projectId": "prj_qingmai_launch"
+}
+
+### 生成三档提示词
+POST {{baseUrl}}/api/v1/prompts/generate
+Content-Type: application/json
+Idempotency-Key: example-prompt-001
+
+{
+  "projectId": "prj_qingmai_launch",
+  "objective": "为草莓燕麦杯生成30秒短视频脚本，未确认价格保持空缺"
+}

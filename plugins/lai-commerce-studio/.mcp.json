@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "lai-commerce-studio": {
+      "type": "http",
+      "url": "http://127.0.0.1:3101/mcp",
+      "headers": {
+        "Authorization": "Bearer ${LAI_COMMERCE_TOKEN}"
+      }
+    }
+  }
+}
