@@ -2,9 +2,9 @@ packages:
   - "apps/*"
   - "packages/*"
 
-# pnpm 需要明确允许这些跨平台原生依赖执行安装脚本。
+# pnpm 11 需要明确允许这些跨平台原生依赖执行安装脚本。
 # 在 macOS 上会安装与当前 Node 架构一致的 darwin-arm64 或 darwin-x64 构建。
-onlyBuiltDependencies:
-  - better-sqlite3
-  - esbuild
-  - sharp
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+  sharp: true
