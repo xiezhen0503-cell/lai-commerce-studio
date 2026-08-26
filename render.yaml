@@ -13,7 +13,15 @@ services:
       - key: DATABASE_PATH
         value: /tmp/laicommerce.db
       - key: LAI_TEXT_PROVIDER
-        value: auto
+        value: openrouter
+      - key: OPENROUTER_MODEL
+        value: openrouter/free
+      - key: OPENROUTER_SITE_URL
+        value: https://lai-commerce-studio-test.onrender.com
+      - key: OPENROUTER_APP_NAME
+        value: LaiCommerce Studio
+      - key: OPENROUTER_API_KEY
+        sync: false
       - key: OPENAI_MODEL
         value: gpt-5.6-sol
       - key: OPENAI_REASONING_EFFORT

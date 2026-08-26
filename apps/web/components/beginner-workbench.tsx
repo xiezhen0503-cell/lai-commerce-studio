@@ -14,7 +14,7 @@ type InitialContext = {
   sourceNames: string[];
   confirmedFacts: Array<{ type: string; value: string }>;
   pendingFactNames: string[];
-  ai: { mode: "openai" | "mock"; provider: string; model: string; configured: boolean; live: boolean };
+  ai: { mode: "openai" | "openrouter" | "mock"; provider: string; model: string; configured: boolean; live: boolean };
 };
 
 type WorkbenchResponse = {
@@ -53,6 +53,17 @@ const taskOptions = [
   { id: "video", label: "视频分镜", description: "镜头、动作与节奏", icon: Layers3, artifactType: "video-storyboard", example: "做一条 30 秒商品视频分镜，适合手机竖屏观看，价格先留空" },
   { id: "bundle", label: "整套活动", description: "方案到视频一次整理", icon: Sparkles, artifactType: "proposal", example: "为这个商品生成一整套新品上市内容，包含方案、脚本、主图、视频和排期" }
 ] as const;
+
+function providerDisplayName(provider: string, live: boolean) {
+  if (!live) return "演示模式";
+  return provider === "openrouter-free" ? "免费测试模型" : "Codex";
+}
+
+function providerHint(mode: InitialContext["ai"]["mode"]) {
+  if (mode === "openrouter") return "免费测试模型会自动加入商品事实、品牌语气和平台要求";
+  if (mode === "openai") return "Codex 会自动加入商品事实、品牌语气和平台要求";
+  return "演示 AI 会自动加入商品事实；配置服务端密钥后切换真实模型";
+}
 
 export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
   const [taskId,setTaskId] = useState<(typeof taskOptions)[number]["id"]>("script");
@@ -133,7 +144,7 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
         <div className={styles.modeRow}>
           <div className={styles.modePill}><WandSparkles size={14}/> 新手 AI 工作台</div>
           <div className={`${styles.modelPill} ${initial.ai.live ? styles.modelLive : ""}`} aria-label="当前 AI 模型">
-            <span aria-hidden="true"/>{initial.ai.live ? `Codex · ${initial.ai.model}` : "演示模式 · Codex 待配置"}
+            <span aria-hidden="true"/>{initial.ai.live ? `${providerDisplayName(initial.ai.provider, true)} · ${initial.ai.model}` : "演示模式 · 真实模型待配置"}
           </div>
         </div>
         <h1>不用学提示词，<br/><span>把想做的事说清楚就行。</span></h1>
@@ -173,7 +184,7 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
         <label className={styles.promptLabel} htmlFor="beginner-objective"><span>用一句话说说你的要求</span><small>{objective.length}/240</small></label>
         <div className={styles.promptBox}>
           <textarea id="beginner-objective" maxLength={240} value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="例如：写一条 30 秒短视频脚本，开头抓人，但不要夸大功效"/>
-          <div className={styles.promptFooter}><div><Sparkles size={13}/><span>{initial.ai.live ? "Codex 会自动加入商品事实、品牌语气和平台要求" : "演示 AI 会自动加入商品事实；配置服务端密钥后切换 Codex"}</span></div><button type="button" onClick={generate} disabled={!ready || Boolean(stage)}>{stage?<LoaderCircle className={styles.spin} size={16}/>:<ArrowRight size={16}/>} {stage || "帮我生成第一版"}</button></div>
+          <div className={styles.promptFooter}><div><Sparkles size={13}/><span>{providerHint(initial.ai.mode)}</span></div><button type="button" onClick={generate} disabled={!ready || Boolean(stage)}>{stage?<LoaderCircle className={styles.spin} size={16}/>:<ArrowRight size={16}/>} {stage || "帮我生成第一版"}</button></div>
         </div>
         {error && <div className={styles.error} role="alert">{error}</div>}
         <div className={styles.safeNote}><ShieldCheck size={14}/><span>先生成草稿，不会自动发布、花钱或修改店铺。</span><Link href="/prompt-lab">进入专业模式 <ChevronRight size={12}/></Link></div>
@@ -183,8 +194,8 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
     {result && <section className={styles.result} ref={resultRef} aria-live="polite">
       <div className={styles.resultHead}><div><div className={styles.resultEyebrow}><Check size={13}/> 第一版已完成</div><h2>{result.title}</h2><p>{result.bundleCount ? `共整理 ${result.bundleCount} 项内容，已放入当前项目。` : "你可以直接复制，也可以进入完整工作台继续修改。"}</p></div><div className={styles.score}><strong>{result.score}</strong><span>任务完整度</span></div></div>
       <div className={styles.resultBody}>
-        <article className={styles.output}><div className={styles.outputToolbar}><div className={styles.outputIdentity}><span>{selectedTask.label}</span><small><Bot size={12}/>{result.live ? "Codex" : "演示模式"} · {result.model}</small></div><button type="button" onClick={copyResult}><Clipboard size={13}/>{copied?"已复制":"复制结果"}</button></div><pre>{result.content}</pre></article>
-        <aside className={styles.evidence}><h3>AI 这次依据了什么</h3><div className={styles.evidenceRow}><span>当前模型</span><strong>{result.live ? "Codex" : "演示"}</strong></div><div className={styles.evidenceRow}><span>已确认事实</span><strong>{result.facts.length} 条</strong></div><div className={styles.evidenceRow}><span>引用资料</span><strong>{result.sources.length} 份</strong></div><div className={styles.evidenceRow}><span>待确认</span><strong>{result.missing.length} 项</strong></div>{result.missing.length>0&&<div className={styles.missingBox}>{result.missing.join("；")}</div>}<Link className={styles.projectLink} href={`/projects/${initial.projectId}`}>打开完整项目 <ChevronRight size={13}/></Link></aside>
+        <article className={styles.output}><div className={styles.outputToolbar}><div className={styles.outputIdentity}><span>{selectedTask.label}</span><small><Bot size={12}/>{providerDisplayName(result.provider, result.live)} · {result.model}</small></div><button type="button" onClick={copyResult}><Clipboard size={13}/>{copied?"已复制":"复制结果"}</button></div><pre>{result.content}</pre></article>
+        <aside className={styles.evidence}><h3>AI 这次依据了什么</h3><div className={styles.evidenceRow}><span>当前模型</span><strong>{providerDisplayName(result.provider, result.live)}</strong></div><div className={styles.evidenceRow}><span>已确认事实</span><strong>{result.facts.length} 条</strong></div><div className={styles.evidenceRow}><span>引用资料</span><strong>{result.sources.length} 份</strong></div><div className={styles.evidenceRow}><span>待确认</span><strong>{result.missing.length} 项</strong></div>{result.missing.length>0&&<div className={styles.missingBox}>{result.missing.join("；")}</div>}<Link className={styles.projectLink} href={`/projects/${initial.projectId}`}>打开完整项目 <ChevronRight size={13}/></Link></aside>
       </div>
     </section>}
 

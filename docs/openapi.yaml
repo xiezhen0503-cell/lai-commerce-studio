@@ -356,8 +356,8 @@ components:
               type: object
               required: [provider, model, latency, tokenUsage]
               properties:
-                provider: { type: string, examples: [openai-responses] }
-                model: { type: string, examples: [gpt-5.6-sol] }
+                provider: { type: string, examples: [openai-responses, openrouter-free] }
+                model: { type: string, examples: [gpt-5.6-sol, openrouter/free] }
                 latency: { type: integer, minimum: 0 }
                 tokenUsage: { type: integer, minimum: 0 }
               additionalProperties: true

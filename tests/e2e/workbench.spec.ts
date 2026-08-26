@@ -18,7 +18,7 @@ test("新手工作台可以从一句话生成第一版内容", async ({ page }) 
 
   await page.goto(accessPath);
   await expect(page.getByRole("heading", { name: /不用学提示词/ })).toBeVisible();
-  await expect(page.getByLabel("当前 AI 模型")).toContainText(/Codex|演示模式/);
+  await expect(page.getByLabel("当前 AI 模型")).toContainText(/Codex|免费测试模型|演示模式/);
   await expect(page.getByLabel("AI 内容生成工作台")).toContainText("本次使用的资料");
   await page.getByRole("button", { name: /活动方案/ }).click();
   await page.getByLabel("用一句话说说你的要求").fill("为草莓燕麦杯做一份 7 天新品上市方案，价格未确认时必须留空");

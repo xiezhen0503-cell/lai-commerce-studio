@@ -4,8 +4,10 @@ import { detectPromptInjection } from "@lai/security";
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const DEFAULT_OPENAI_MODEL = "gpt-5.6-sol";
+const DEFAULT_OPENROUTER_MODEL = "openrouter/free";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
-const OPENAI_INSTRUCTIONS = `你是 LaiCommerce Studio 的中文电商内容助手。
+const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
+const COMMERCE_INSTRUCTIONS = `你是 LaiCommerce Studio 的中文电商内容助手。
 
 工作要求：
 - 只使用用户输入中明确给出的事实，不补造价格、规格、活动日期、资质、功效或销量。
@@ -15,7 +17,8 @@ const OPENAI_INSTRUCTIONS = `你是 LaiCommerce Studio 的中文电商内容助�
 - 只生成草稿，不声称已经发布、投放、扣费或修改店铺。`;
 
 type OpenAIReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
-type TextProviderMode = "auto" | "openai" | "mock";
+type TextProviderMode = "auto" | "openai" | "openrouter" | "mock";
+type ActiveTextProvider = Exclude<TextProviderMode, "auto">;
 
 type OpenAIResponsePayload = {
   model?: string;
@@ -25,9 +28,16 @@ type OpenAIResponsePayload = {
   usage?: { total_tokens?: number } | null;
 };
 
+type OpenRouterResponsePayload = {
+  model?: string;
+  error?: { message?: string } | null;
+  choices?: Array<{ message?: { content?: string | Array<{ type?: string; text?: string }> } }>;
+  usage?: { total_tokens?: number } | null;
+};
+
 function textProviderMode(): TextProviderMode {
   const value = process.env.LAI_TEXT_PROVIDER?.trim().toLowerCase();
-  return value === "openai" || value === "mock" ? value : "auto";
+  return value === "openai" || value === "openrouter" || value === "mock" ? value : "auto";
 }
 
 function openAIModel() {
@@ -39,13 +49,24 @@ function openAIReasoningEffort(): OpenAIReasoningEffort {
   return value === "none" || value === "minimal" || value === "medium" || value === "high" || value === "xhigh" ? value : "low";
 }
 
+function openRouterModel() {
+  return process.env.OPENROUTER_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL;
+}
+
 function openAIConfigured() {
   return Boolean(process.env.OPENAI_API_KEY?.trim());
 }
 
-function shouldUseOpenAI() {
+function openRouterConfigured() {
+  return Boolean(process.env.OPENROUTER_API_KEY?.trim());
+}
+
+function activeTextProvider(): ActiveTextProvider {
   const mode = textProviderMode();
-  return mode === "openai" || (mode === "auto" && openAIConfigured());
+  if (mode !== "auto") return mode;
+  if (openAIConfigured()) return "openai";
+  if (openRouterConfigured()) return "openrouter";
+  return "mock";
 }
 
 function extractOpenAIText(payload: OpenAIResponsePayload) {
@@ -53,6 +74,16 @@ function extractOpenAIText(payload: OpenAIResponsePayload) {
     .filter((item) => item.type === "message")
     .flatMap((item) => item.content ?? [])
     .filter((part) => part.type === "output_text" && typeof part.text === "string")
+    .map((part) => part.text?.trim() ?? "")
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function extractOpenRouterText(payload: OpenRouterResponsePayload) {
+  const content = payload.choices?.[0]?.message?.content;
+  if (typeof content === "string") return content.trim();
+  return (content ?? [])
+    .filter((part) => part.type === "text" && typeof part.text === "string")
     .map((part) => part.text?.trim() ?? "")
     .filter(Boolean)
     .join("\n\n");
@@ -93,7 +124,7 @@ export class OpenAIResponsesTextProvider implements TextGenerationProvider {
         },
         body: JSON.stringify({
           model,
-          instructions: OPENAI_INSTRUCTIONS,
+          instructions: COMMERCE_INSTRUCTIONS,
           input: prompt,
           reasoning: { effort: openAIReasoningEffort() },
           text: { verbosity: "medium" },
@@ -124,21 +155,95 @@ export class OpenAIResponsesTextProvider implements TextGenerationProvider {
   }
 }
 
+export class OpenRouterFreeTextProvider implements TextGenerationProvider {
+  name = "openrouter-free";
+  get configured() { return openRouterConfigured(); }
+
+  async generate(_spec: PromptSpec, prompt: string) {
+    const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+    if (!apiKey) throw new Error("免费测试模型尚未配置：请在服务端设置 OPENROUTER_API_KEY，密钥不要放进网页或提交到 GitHub。");
+
+    const model = openRouterModel();
+    const started = performance.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 90_000);
+
+    try {
+      const response = await fetch(OPENROUTER_CHAT_URL, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${apiKey}`,
+          ...(process.env.OPENROUTER_SITE_URL?.trim() ? { "http-referer": process.env.OPENROUTER_SITE_URL.trim() } : {}),
+          "x-openrouter-title": process.env.OPENROUTER_APP_NAME?.trim() || "LaiCommerce Studio"
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: COMMERCE_INSTRUCTIONS },
+            { role: "user", content: prompt }
+          ],
+          temperature: 0.6,
+          max_tokens: 3_500
+        }),
+        signal: controller.signal
+      });
+      const payload = await response.json().catch(() => ({})) as OpenRouterResponsePayload;
+      if (!response.ok) {
+        const detail = payload.error?.message?.trim();
+        throw new Error(`免费测试模型调用失败（${response.status}）${detail ? `：${detail}` : "，请检查 OpenRouter 密钥或免费额度"}`);
+      }
+      const text = extractOpenRouterText(payload);
+      if (!text) throw new Error("免费测试模型没有返回可用文本，请稍后重试或再次生成。");
+      return {
+        text,
+        model: payload.model?.trim() || model,
+        latencyMs: Math.round(performance.now() - started),
+        tokenUsage: payload.usage?.total_tokens ?? 0
+      };
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw new Error("免费测试模型响应超时，请稍后重试。");
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+}
+
 export class RoutedTextProvider implements TextGenerationProvider {
-  private active() { return shouldUseOpenAI() ? new OpenAIResponsesTextProvider() : new MockTextProvider(); }
+  private active() {
+    const provider = activeTextProvider();
+    if (provider === "openai") return new OpenAIResponsesTextProvider();
+    if (provider === "openrouter") return new OpenRouterFreeTextProvider();
+    return new MockTextProvider();
+  }
   get name() { return this.active().name; }
   get configured() { return this.active().configured; }
   generate(spec: PromptSpec, prompt: string) { return this.active().generate(spec, prompt); }
 }
 
 export function getTextProviderStatus() {
-  const useOpenAI = shouldUseOpenAI();
+  const active = activeTextProvider();
+  if (active === "openai") return {
+    mode: "openai" as const,
+    provider: "openai-responses",
+    model: openAIModel(),
+    configured: openAIConfigured(),
+    live: openAIConfigured()
+  };
+  if (active === "openrouter") return {
+    mode: "openrouter" as const,
+    provider: "openrouter-free",
+    model: openRouterModel(),
+    configured: openRouterConfigured(),
+    live: openRouterConfigured()
+  };
   return {
-    mode: useOpenAI ? "openai" as const : "mock" as const,
-    provider: useOpenAI ? "openai-responses" : "mock-text-v1",
-    model: useOpenAI ? openAIModel() : "mock-text-v1",
-    configured: useOpenAI ? openAIConfigured() : true,
-    live: useOpenAI && openAIConfigured()
+    mode: "mock" as const,
+    provider: "mock-text-v1",
+    model: "mock-text-v1",
+    configured: true,
+    live: false
   };
 }
 
@@ -189,6 +294,10 @@ export class OpenAIAdapter extends ExternalProviderAdapter {
   model = openAIModel();
   constructor() { super("OpenAI Responses", OPENAI_RESPONSES_URL, openAIConfigured()); }
 }
+export class OpenRouterAdapter extends ExternalProviderAdapter {
+  model = openRouterModel();
+  constructor() { super("OpenRouter Free", OPENROUTER_CHAT_URL, openRouterConfigured()); }
+}
 export class AnthropicAdapter extends ExternalProviderAdapter { constructor() { super("Anthropic", undefined, Boolean(process.env.ANTHROPIC_API_KEY)); } }
 export class GeminiAdapter extends ExternalProviderAdapter { constructor() { super("Gemini", undefined, Boolean(process.env.GEMINI_API_KEY)); } }
 export class DoclingAdapter extends ExternalProviderAdapter { constructor() { super("Docling", process.env.DOCLING_URL); } }
@@ -202,7 +311,7 @@ export class LangfuseAdapter extends ExternalProviderAdapter { constructor() { s
 
 export const providerRegistry = {
   text: new RoutedTextProvider(), image: new MockImageProvider(), document: new MockDocumentParser(), voice: new MockVoiceProvider(), video: new MockVideoProvider(),
-  openai: new OpenAIAdapter(), anthropic: new AnthropicAdapter(), gemini: new GeminiAdapter(), docling: new DoclingAdapter(), dify: new DifyAdapter(),
+  openai: new OpenAIAdapter(), openrouter: new OpenRouterAdapter(), anthropic: new AnthropicAdapter(), gemini: new GeminiAdapter(), docling: new DoclingAdapter(), dify: new DifyAdapter(),
   ragflow: new RAGFlowAdapter(), comfyui: new ComfyUIAdapter(), n8n: new N8nWebhookAdapter(), langfuse: new LangfuseAdapter(),
   promptfoo: new PromptfooAdapter(), remotion: new RemotionAdapter()
 };

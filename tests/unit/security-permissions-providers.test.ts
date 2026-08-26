@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { authorize, defaultAgentPrincipal } from "@lai/permissions";
-import { getTextProviderStatus, MockImageProvider, MockTextProvider, MockVideoProvider, MockVoiceProvider, OpenAIResponsesTextProvider, RoutedTextProvider } from "@lai/providers";
+import { getTextProviderStatus, MockImageProvider, MockTextProvider, MockVideoProvider, MockVoiceProvider, OpenAIResponsesTextProvider, OpenRouterFreeTextProvider, RoutedTextProvider } from "@lai/providers";
 import { detectPromptInjection, redact, safeWorkspacePath, signWebhook, validateOutboundUrl, validateUpload, verifyWebhook } from "@lai/security";
 import { CommerceRepository } from "@lai/database";
 import { CommerceService, DEMO_PROJECT_ID } from "@lai/shared";
@@ -89,6 +89,33 @@ describe("安全、权限和 Provider", () => {
     expect(new Headers(request?.headers).get("authorization")).toBe("Bearer sk-test-only");
     expect(body).toMatchObject({ model: "gpt-5.6-sol", input: "只使用已确认事实", reasoning: { effort: "low" }, store: false });
     expect(generated).toMatchObject({ text: "第一段\n\n第二段", model: "gpt-5.6-sol", tokenUsage: 321 });
+    service.repo.close();
+  });
+
+  it("通过 OpenRouter 免费路由调用真实测试模型", async () => {
+    vi.stubEnv("LAI_TEXT_PROVIDER", "openrouter");
+    vi.stubEnv("OPENROUTER_API_KEY", "or-test-only");
+    vi.stubEnv("OPENROUTER_MODEL", "openrouter/free");
+    vi.stubEnv("OPENROUTER_SITE_URL", "https://example.test");
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
+      model: "qwen/qwen3.6-27b:free",
+      choices: [{ message: { content: "免费模型测试结果" } }],
+      usage: { total_tokens: 88 }
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const service = new CommerceService(new CommerceRepository(":memory:"));
+    const spec = service.makeCompileContext(DEMO_PROJECT_ID, "生成免费模型测试稿").spec;
+    const generated = await new OpenRouterFreeTextProvider().generate(spec, "只使用已确认事实");
+    const request = fetchMock.mock.calls[0]?.[1];
+    const body = JSON.parse(String(request?.body));
+
+    expect(fetchMock).toHaveBeenCalledWith("https://openrouter.ai/api/v1/chat/completions", expect.objectContaining({ method: "POST" }));
+    expect(new Headers(request?.headers).get("authorization")).toBe("Bearer or-test-only");
+    expect(new Headers(request?.headers).get("http-referer")).toBe("https://example.test");
+    expect(body).toMatchObject({ model: "openrouter/free", messages: [{ role: "system" }, { role: "user", content: "只使用已确认事实" }] });
+    expect(getTextProviderStatus()).toMatchObject({ mode: "openrouter", provider: "openrouter-free", model: "openrouter/free", live: true });
+    expect(generated).toMatchObject({ text: "免费模型测试结果", model: "qwen/qwen3.6-27b:free", tokenUsage: 88 });
     service.repo.close();
   });
 

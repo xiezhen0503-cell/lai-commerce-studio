@@ -2,11 +2,11 @@
 
 ## 文本模型路由
 
-`RoutedTextProvider` 默认使用 `LAI_TEXT_PROVIDER=auto`：服务端检测到 `OPENAI_API_KEY` 时，通过 OpenAI Responses API 调用 Codex `gpt-5.6-sol`；没有密钥时使用 `MockTextProvider`。也可以显式设置 `LAI_TEXT_PROVIDER=openai` 或 `LAI_TEXT_PROVIDER=mock`。
+`RoutedTextProvider` 支持 `LAI_TEXT_PROVIDER=auto | openai | openrouter | mock`。`auto` 会先检测 OpenAI，再检测 OpenRouter；都没有密钥时使用 `MockTextProvider`。公开测试站显式使用 `openrouter`，通过 OpenRouter Chat Completions API 调用 `openrouter/free` 免费模型路由；正式切回 Codex 时设置为 `openai`。
 
 OpenAI 请求只在服务端发出，使用 `store: false`，默认推理强度为 `low`。可通过 `OPENAI_MODEL` 与 `OPENAI_REASONING_EFFORT` 调整。API Key、组织 ID 和项目 ID 不会返回浏览器或写入日志。
 
-模型调用失败时不会偷偷切回 Mock，以免把演示内容冒充真实模型结果；只有“未配置密钥”的 `auto` 模式会使用 Mock。
+模型调用失败时不会偷偷切回 Mock，以免把演示内容冒充真实模型结果；只有“未配置任何真实密钥”的 `auto` 模式会使用 Mock。OpenRouter 免费模型只有低频测试额度，模型和可用性可能变化，页面会明确标为“免费测试模型”。
 
 公开测试站点建议同时配置 `WORKBENCH_ACCESS_TOKEN`。用户通过 `/access/{token}` 专属链接进入后，服务端设置 7 天 HttpOnly Cookie；模型生成接口会校验该 Cookie，避免公开页面被批量消耗模型额度。这个 Token 只是测试链接凭证，不得替代正式用户登录与权限系统。
 
@@ -20,7 +20,7 @@ MockTextProvider 生成确定性文案，MockDocumentProvider 模拟解析，Moc
 
 ## 可选集成
 
-- 文本模型：OpenAI Responses API 已接入；Anthropic、Gemini 当前只提供配置状态 Adapter。
+- 文本模型：OpenAI Responses API 与 OpenRouter 免费路由均已接入；Anthropic、Gemini 当前只提供配置状态 Adapter。
 - 文档：Docling/RAGFlow 只接收白名单文件，结果仍要经过事实确认。
 - 图像：ComfyUI 等服务必须通过 SSRF allowlist，产品外观和文字保真由审核负责。
 - 视频：Remotion 模板可本地预览；服务端渲染需单独确认算力与许可证。
