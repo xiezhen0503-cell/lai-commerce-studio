@@ -43,6 +43,7 @@ test("新手工作台可以从一句话生成第一版内容", async ({ page }) 
   await expect(page.getByText("第一版已完成", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "新品上市方案" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "AI 这次依据了什么" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "下载结果" })).toBeVisible();
   await expect(page.getByRole("button", { name: "复制结果" })).toBeVisible();
 
   await page.getByRole("link", { name: /进入专业模式/ }).click();
@@ -133,10 +134,31 @@ test("商业 Demo 的资料、事实、版本、图片、视频、审核和导�
   await expect(page.getByText("成果已批准", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "导出", exact: true }).click();
-  const exportHref = await page.getByRole("link", { name: "下载", exact: true }).first().getAttribute("href");
-  const exportResponse = await page.request.get(exportHref!);
-  expect(exportResponse.ok()).toBeTruthy();
-  expect(exportResponse.headers()["content-type"]).toContain("text/markdown");
+  const proposalRow = page.locator("li.list-item").filter({ hasText: "新品上市方案" }).first();
+  const markdownHref = await proposalRow.getByRole("link", { name: "Markdown", exact: true }).getAttribute("href");
+  const markdownResponse = await page.request.get(markdownHref!);
+  expect(markdownResponse.ok()).toBeTruthy();
+  expect(markdownResponse.headers()["content-type"]).toContain("text/markdown");
+  expect(await markdownResponse.text()).toContain("人工修订商业验收方案");
+
+  const storyboardRow = page.locator("li.list-item").filter({ hasText: "五张主图 Storyboard" }).first();
+  const xlsxResponse = await page.request.get((await storyboardRow.getByRole("link", { name: "Excel", exact: true }).getAttribute("href"))!);
+  expect(xlsxResponse.headers()["content-type"]).toContain("spreadsheetml");
+  expect((await xlsxResponse.body()).subarray(0, 2).toString()).toBe("PK");
+
+  const imageRow = page.locator("li.list-item").filter({ hasText: "主图预览" }).first();
+  const svgResponse = await page.request.get((await imageRow.getByRole("link", { name: "SVG", exact: true }).getAttribute("href"))!);
+  expect(svgResponse.headers()["content-type"]).toContain("image/svg+xml");
+  expect(await svgResponse.text()).toContain("<svg");
+
+  const videoRow = page.locator("li.list-item").filter({ hasText: "Remotion 视频草稿" }).first();
+  const videoZipResponse = await page.request.get((await videoRow.getByRole("link", { name: "项目包 ZIP", exact: true }).getAttribute("href"))!);
+  expect(videoZipResponse.headers()["content-type"]).toContain("application/zip");
+  expect((await videoZipResponse.body()).subarray(0, 2).toString()).toBe("PK");
+
+  const allZipResponse = await page.request.get((await page.getByRole("link", { name: "下载全部 ZIP", exact: true }).getAttribute("href"))!);
+  expect(allZipResponse.headers()["content-type"]).toContain("application/zip");
+  expect((await allZipResponse.body()).subarray(0, 2).toString()).toBe("PK");
 
   await page.getByRole("button", { name: "资料", exact: true }).click();
   const sourceRow = page.locator("li.list-item").filter({ hasText: fileName });

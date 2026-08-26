@@ -138,7 +138,8 @@
 .outputToolbar { display: flex; align-items: center; justify-content: space-between; padding: 11px 18px; border-bottom: 1px solid #ececf2; color: #65687b; font-size: 9px; font-weight: 800; }
 .outputIdentity { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
 .outputIdentity small { display: inline-flex; align-items: center; gap: 4px; padding: 4px 6px; border-radius: 999px; color: #4c4899; background: #efedff; font: 700 8px ui-monospace,monospace; }
-.outputToolbar button { display: inline-flex; align-items: center; gap: 5px; padding: 6px 8px; border: 1px solid #dedfe8; border-radius: 8px; color: #5b5e71; background: white; font-size: 8px; }
+.outputActions { display: flex; align-items: center; gap: 6px; }
+.outputToolbar button,.downloadLink { display: inline-flex; align-items: center; gap: 5px; padding: 6px 8px; border: 1px solid #dedfe8; border-radius: 8px; color: #5b5e71; background: white; font-size: 8px; }
 .output pre { max-height: 560px; margin: 0; padding: 22px; overflow: auto; white-space: pre-wrap; color: #34344b; font: 11px/1.9 ui-monospace,"Cascadia Code",monospace; }
 .evidence { padding: 20px; }
 .evidence h3 { margin-bottom: 16px; font-size: 11px; }

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRef, useState, type ChangeEvent } from "react";
-import { ArrowRight, Bot, Check, ChevronRight, Clipboard, FileCheck2, FileText, Film, Image as ImageIcon, Layers3, LoaderCircle, Package, Paperclip, ShieldCheck, Sparkles, WandSparkles } from "lucide-react";
+import { ArrowRight, Bot, Check, ChevronRight, Clipboard, Download, FileCheck2, FileText, Film, Image as ImageIcon, Layers3, LoaderCircle, Package, Paperclip, ShieldCheck, Sparkles, WandSparkles } from "lucide-react";
 import styles from "./beginner-workbench.module.css";
 
 type InitialContext = {
@@ -214,7 +214,7 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
     {result && <section className={styles.result} ref={resultRef} aria-live="polite">
       <div className={styles.resultHead}><div><div className={styles.resultEyebrow}><Check size={13}/> 第一版已完成</div><h2>{result.title}</h2><p>{result.bundleCount ? `共整理 ${result.bundleCount} 项内容，已放入当前项目。` : "你可以直接复制，也可以进入完整工作台继续修改。"}</p></div><div className={styles.score}><strong>{result.score}</strong><span>任务完整度</span></div></div>
       <div className={styles.resultBody}>
-        <article className={styles.output}><div className={styles.outputToolbar}><div className={styles.outputIdentity}><span>{selectedTask.label}</span><small><Bot size={12}/>{providerDisplayName(result.provider, result.live)} · {result.model}</small></div><button type="button" onClick={copyResult}><Clipboard size={13}/>{copied?"已复制":"复制结果"}</button></div><pre>{result.content}</pre></article>
+        <article className={styles.output}><div className={styles.outputToolbar}><div className={styles.outputIdentity}><span>{selectedTask.label}</span><small><Bot size={12}/>{providerDisplayName(result.provider, result.live)} · {result.model}</small></div><div className={styles.outputActions}><a className={styles.downloadLink} href={result.artifactId?`/api/v1/artifacts/${result.artifactId}/export`:`/api/v1/projects/${initial.projectId}/export`}><Download size={13}/>{result.bundleCount?"下载全部":"下载结果"}</a><button type="button" onClick={copyResult}><Clipboard size={13}/>{copied?"已复制":"复制结果"}</button></div></div><pre>{result.content}</pre></article>
         <aside className={styles.evidence}><h3>AI 这次依据了什么</h3><div className={styles.evidenceRow}><span>当前模型</span><strong>{providerDisplayName(result.provider, result.live)}</strong></div><div className={styles.evidenceRow}><span>已确认事实</span><strong>{result.facts.length} 条</strong></div><div className={styles.evidenceRow}><span>引用资料</span><strong>{result.sources.length} 份</strong></div><div className={styles.evidenceRow}><span>待确认</span><strong>{result.missing.length} 项</strong></div>{result.missing.length>0&&<div className={styles.missingBox}>{result.missing.join("；")}</div>}<Link className={styles.projectLink} href={`/projects/${initial.projectId}`}>打开完整项目 <ChevronRight size={13}/></Link></aside>
       </div>
     </section>}

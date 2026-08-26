@@ -51,6 +51,18 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/Success' }
         '404': { $ref: '#/components/responses/Error' }
+  /api/v1/projects/{projectId}/export:
+    parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+    get:
+      tags: [Projects]
+      summary: 下载项目全部成果 ZIP
+      description: 每个成果按类型选择默认原生格式，并附带版本、事实快照、状态和项目 manifest。视频包含可编辑的 Remotion 项目包，不冒充 MP4。
+      security: [{ WorkbenchAccess: [] }]
+      responses:
+        '200': { description: ZIP 文件响应 }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
   /api/v1/projects/{projectId}/sources:
     parameters: [{ $ref: '#/components/parameters/ProjectId' }]
     get:
@@ -187,9 +199,18 @@ paths:
         schema: { type: string }
     get:
       tags: [Prompts]
-      summary: 导出通用或模型专用提示词
+      summary: 导出提示词当前版本
+      security: [{ WorkbenchAccess: [] }]
+      parameters:
+        - name: format
+          in: query
+          required: false
+          description: 不传时默认 Markdown。
+          schema: { type: string, enum: [md, docx, html, txt, json], default: md }
       responses:
-        '200': { $ref: '#/components/responses/Success' }
+        '200': { description: 文件响应 }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
   /api/v1/campaigns:
     post:
       tags: [Campaigns]
@@ -311,9 +332,18 @@ paths:
         schema: { type: string }
     get:
       tags: [Campaigns]
-      summary: 导出物料当前版本
+      summary: 按成果类型导出当前版本
+      description: 文本成果支持 MD/DOCX/HTML/TXT/JSON；结构化成果支持 JSON/XLSX/CSV/DOCX；图片支持 SVG/JSON；视频支持 Remotion ZIP/HTML/JSON。实际可用格式由成果类型决定。
+      security: [{ WorkbenchAccess: [] }]
+      parameters:
+        - name: format
+          in: query
+          required: false
+          schema: { type: string, enum: [md, txt, html, json, csv, xlsx, docx, svg, zip] }
       responses:
         '200': { description: 文件响应 }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
   /api/v1/projects/{projectId}/artifacts/{artifactId}/versions/{versionId}/restore:
     parameters:
       - { $ref: '#/components/parameters/ProjectId' }

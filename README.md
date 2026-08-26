@@ -37,7 +37,7 @@ pnpm dev
 1. 打开首页“新手 AI 工作台”，可批量上传 PDF、DOCX、PPTX、XLSX、CSV、TXT、Markdown、JPG 或 PNG；系统保存原文件、解析正文并提出事实候选。
 2. 选择活动方案、短视频脚本、商品主图、视频分镜或整套活动，勾选发布平台，用一句话说清楚想做什么。
 3. 在结果旁查看 AI 使用了多少份资料、多少条已确认事实，以及还有哪些内容不能擅自补写。
-4. 进入完整项目后可预览/重新解析/删除资料、确认事实、编辑和恢复成果版本、查看主图 SVG、播放 Remotion 视频、提交并决定审核、导出 Markdown，以及测试/撤销智能体连接。
+4. 进入完整项目后可预览/重新解析/删除资料、确认事实、编辑和恢复成果版本、查看主图 SVG、播放 Remotion 视频、提交并决定审核、按成果类型下载文件或一次下载全部 ZIP，以及测试/撤销智能体连接。
 
 首页预置虚构商品，不需要 API key 就能体验 Mock 交互。免费真实模型测试可配置 `OPENROUTER_API_KEY`，使用 `openrouter/free`；要启用 Codex，则配置 `OPENAI_API_KEY`，默认模型为 `gpt-5.6-sol`。所有密钥只放在服务端环境变量或秘密管理服务中，不得写进网页、`.env.example` 或提交到 GitHub。
 
@@ -87,6 +87,7 @@ pnpm build
 | 图片 | 五张主图 Storyboard 与确定性 SVG 构图预览会真实生成、保存、预览和版本化；不是扩散模型精修图 | 无 Key；最终商业图片需接 ComfyUI 或图片供应商 |
 | 语音 | Mock 演示并明确标识 | 真实配音需接语音 Provider |
 | Remotion 视频 | 三个模板和浏览器 Player 预览会真实执行 | 本地预览不需要 GPU；MP4 服务端批量渲染需独立部署，并核验 Remotion 许可 |
+| 成果下载 | 文本支持 MD/DOCX/HTML/TXT/JSON；表格与结构化成果支持 JSON/XLSX/CSV/DOCX；主图支持 SVG/JSON；视频支持 Remotion ZIP/HTML/JSON；项目可整包 ZIP 下载 | 当前不生成 PDF 或 MP4，不用伪文件冒充成片 |
 | Anthropic / Gemini | Adapter 和配置状态已实现，默认关闭 | 需要对应 API Key |
 | Docling / RAGFlow / Dify / ComfyUI / n8n / Langfuse | Adapter 边界和配置页已实现，默认关闭 | 需要独立部署；ComfyUI 通常需要 GPU；部分产品有商业或分发限制 |
 | 真实电商平台发布 | 未实现，且不由本项目自动执行 | 下一阶段需平台授权、当期规则审核和发布前人工确认 |
@@ -122,6 +123,7 @@ MCP 客户端使用 [`docs/examples/mcp.json`](docs/examples/mcp.json)，服务�
 - macOS CI 分别使用 GitHub `macos-15`（Apple Silicon）与 `macos-15-intel`（Intel）验证；Playwright WebKit 不是 Apple Safari 本体，正式交付仍需在小赖的真实 Mac/Safari 上做一次点击验收。
 - PDF 只读取文本层；扫描件、复杂图表、PPTX 内嵌图片和高级版面需要 OpenRouter 视觉识别或 Docling/OCR 升级。
 - SVG 主图和 Remotion Player 是可操作的商业 Demo 预览，不等同于可直接投放的商品精修图或 MP4 成片；真实图片、配音和服务端 MP4 渲染仍需对应 Provider。
+- 所有下载都绑定成果当前版本与事实快照；视频下载是可继续编辑的 Remotion 项目包和离线 HTML 预览，不是 MP4。中文 PDF 需要先内置合规的 CJK 字体后再开放，因此当前不提供假 PDF。
 - OAuth 配置展示了接入边界，尚未实现第三方身份提供商握手。
 - 平台规则和广告合规具有时效性，公开发布前仍需运营/法务使用当期规则复核。
 

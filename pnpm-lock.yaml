@@ -142,6 +142,15 @@ importers:
       clsx:
         specifier: latest
         version: 2.1.1
+      docx:
+        specifier: ^9.7.1
+        version: 9.7.1
+      exceljs:
+        specifier: ^4.4.0
+        version: 4.4.0
+      jszip:
+        specifier: ^3.10.1
+        version: 3.10.1
       lucide-react:
         specifier: latest
         version: 1.34.0(react@19.2.8)
