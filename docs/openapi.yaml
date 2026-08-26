@@ -20,7 +20,7 @@ paths:
   /api/v1/health:
     get:
       tags: [System]
-      summary: 服务健康状态
+      summary: 服务健康状态（含当前文本模型模式，不包含密钥）
       responses:
         '200': { $ref: '#/components/responses/Success' }
   /api/v1/capabilities:
@@ -104,7 +104,11 @@ paths:
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody: { $ref: '#/components/requestBodies/JsonBody' }
       responses:
-        '202': { $ref: '#/components/responses/Success' }
+        '201':
+          description: 已创建版本化产物；data.run 返回实际 provider、model、latency 与 tokenUsage
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PromptRunEnvelope' }
   /api/v1/prompts/{promptSpecId}/export:
     parameters:
       - name: promptSpecId
@@ -123,7 +127,12 @@ paths:
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody: { $ref: '#/components/requestBodies/JsonBody' }
       responses:
-        '202': { $ref: '#/components/responses/Success' }
+        '201':
+          description: 已创建活动物料；data 返回实际 provider 与 model
+          content: { application/json: { schema: { type: object, additionalProperties: true } } }
+        '200':
+          description: 幂等请求重放
+          content: { application/json: { schema: { type: object, additionalProperties: true } } }
   /api/v1/templates:
     get:
       tags: [Prompts]
@@ -308,6 +317,25 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorEnvelope'
   schemas:
+    PromptRunEnvelope:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: object
+          required: [artifact, run]
+          properties:
+            artifact: { type: object, additionalProperties: true }
+            run:
+              type: object
+              required: [provider, model, latency, tokenUsage]
+              properties:
+                provider: { type: string, examples: [openai-responses] }
+                model: { type: string, examples: [gpt-5.6-sol] }
+                latency: { type: integer, minimum: 0 }
+                tokenUsage: { type: integer, minimum: 0 }
+              additionalProperties: true
+        meta: { type: object, additionalProperties: true }
     ErrorEnvelope:
       type: object
       required: [error]

@@ -38,7 +38,12 @@
 }
 
 .introCopy { position: relative; z-index: 1; }
+.modeRow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .modePill { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid rgba(169,240,210,.34); border-radius: 999px; color: var(--mint); background: rgba(169,240,210,.07); font-size: 11px; font-weight: 800; }
+.modelPill { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid rgba(255,255,255,.15); border-radius: 999px; color: #c5c5df; background: rgba(15,14,52,.28); font: 750 9px ui-monospace,monospace; }
+.modelPill > span { width: 6px; height: 6px; border-radius: 50%; background: #ffb86e; box-shadow: 0 0 0 3px rgba(255,184,110,.12); }
+.modelPill.modelLive { color: #def9ed; border-color: rgba(169,240,210,.28); }
+.modelPill.modelLive > span { background: #7de0b8; box-shadow: 0 0 0 3px rgba(125,224,184,.14); }
 .intro h1 { margin: 22px 0 14px; font-family: "LXGW WenKai","STKaiti","Microsoft YaHei UI",sans-serif; font-size: clamp(34px,4.3vw,58px); line-height: 1.08; letter-spacing: -.06em; }
 .intro h1 span { color: var(--mint); }
 .intro p { max-width: 620px; margin: 0; color: #d5d5ef; font-size: 14px; line-height: 1.8; }
@@ -131,6 +136,8 @@
 .resultBody { display: grid; grid-template-columns: minmax(0,1fr) 230px; }
 .output { min-width: 0; border-right: 1px solid #ececf2; }
 .outputToolbar { display: flex; align-items: center; justify-content: space-between; padding: 11px 18px; border-bottom: 1px solid #ececf2; color: #65687b; font-size: 9px; font-weight: 800; }
+.outputIdentity { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+.outputIdentity small { display: inline-flex; align-items: center; gap: 4px; padding: 4px 6px; border-radius: 999px; color: #4c4899; background: #efedff; font: 700 8px ui-monospace,monospace; }
 .outputToolbar button { display: inline-flex; align-items: center; gap: 5px; padding: 6px 8px; border: 1px solid #dedfe8; border-radius: 8px; color: #5b5e71; background: white; font-size: 8px; }
 .output pre { max-height: 560px; margin: 0; padding: 22px; overflow: auto; white-space: pre-wrap; color: #34344b; font: 11px/1.9 ui-monospace,"Cascadia Code",monospace; }
 .evidence { padding: 20px; }

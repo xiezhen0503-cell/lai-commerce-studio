@@ -189,10 +189,15 @@ export class CommerceService {
     const context = this.makeCompileContext(projectId, spec.objective); context.spec = spec;
     const prompt = compilePrompt(context, "markdown");
     const started = Date.now();
-    const generated = await providerRegistry.text.generate(spec, prompt);
-    const content = artifactType === "script" ? this.mockScript(context) : artifactType === "storyboard" || artifactType === "video-storyboard" ? JSON.stringify(this.mockStoryboard(context, artifactType === "video-storyboard"), null, 2) : generated.text;
-    const artifact = this.createArtifact(projectId, artifactType, this.titleForArtifact(artifactType), content, context.snapshot.id, promptSpecId);
-    const run = { id: newId("run"), promptVersionId: promptSpecId, provider: providerRegistry.text.name, model: generated.model, inputSnapshot: context.snapshot.id, factSnapshotId: context.snapshot.id, output: content, latency: Date.now() - started, tokenUsage: generated.tokenUsage, estimatedCost: 0, qualityScore: evaluatePrompt(spec, context.snapshot).total, errors: [], createdAt: nowIso(), updatedAt: nowIso() };
+    const textProvider = providerRegistry.text;
+    const generated = await textProvider.generate(spec, prompt);
+    const content = generated.model === "mock-text-v1" && artifactType === "script"
+      ? this.mockScript(context)
+      : generated.model === "mock-text-v1" && (artifactType === "storyboard" || artifactType === "video-storyboard")
+        ? JSON.stringify(this.mockStoryboard(context, artifactType === "video-storyboard"), null, 2)
+        : generated.text;
+    const artifact = this.createArtifact(projectId, artifactType, this.titleForArtifact(artifactType), content, context.snapshot.id, promptSpecId, { type: "platform-ai", id: generated.model });
+    const run = { id: newId("run"), promptVersionId: promptSpecId, provider: textProvider.name, model: generated.model, inputSnapshot: context.snapshot.id, factSnapshotId: context.snapshot.id, output: content, latency: Date.now() - started, tokenUsage: generated.tokenUsage, estimatedCost: 0, qualityScore: evaluatePrompt(spec, context.snapshot).total, errors: [], createdAt: nowIso(), updatedAt: nowIso() };
     this.repo.save("prompt_runs", run, { workspaceId: DEMO_WORKSPACE_ID, projectId, parentId: promptSpecId });
     return { artifact, run };
   }
@@ -262,16 +267,17 @@ export class CommerceService {
     const job: GenerationJob = { id: newId("job"), workspaceId: DEMO_WORKSPACE_ID, projectId, type: "campaign-bundle", status: "running", progress: 15, stage: "建立事实快照与任务简报", resultArtifactIds: [], createdAt: nowIso(), updatedAt: nowIso() };
     this.repo.saveJob(job);
     const prompt = this.generatePrompt(projectId, objective);
-    const generated = await providerRegistry.text.generate(prompt.spec, compilePrompt(context));
+    const textProvider = providerRegistry.text;
+    const generated = await textProvider.generate(prompt.spec, compilePrompt(context));
     const items: Array<{ type: z.infer<typeof ArtifactTypeValidator>; content: string }> = [
       { type: "proposal", content: generated.text }, { type: "script", content: this.mockScript(context) }, { type: "storyboard", content: JSON.stringify(this.mockStoryboard(context), null, 2) },
       { type: "image-prompt", content: `保持真实商品包装不变。场景：晨间通勤桌面；光线：柔和侧光；品牌色：${context.brand.colors.join("、")}；价格、规格、Logo、CTA 不进入生成画面，交由程序化图层叠加。` },
       { type: "video-storyboard", content: JSON.stringify(this.mockStoryboard(context, true), null, 2) }, { type: "video", content: JSON.stringify({ template: "Promo30", props: { product: context.products[0]?.name, specification: context.products[0]?.specification, factSnapshotId: context.snapshot.id } }, null, 2) },
       { type: "schedule", content: "第1–2天：素材与开场稿；第3–5天：小流量测试；第6–7天：复盘；第8–14天：胜出内容扩量。" }, { type: "report", content: `事实快照：${context.snapshot.id}\n阻断项：${prompt.evaluation.blockers.join("、") || "无"}\n人工审核：必需` }
     ];
-    const artifacts = items.map((item) => this.createArtifact(projectId, item.type, this.titleForArtifact(item.type), item.content, context.snapshot.id, prompt.spec.id));
+    const artifacts = items.map((item) => this.createArtifact(projectId, item.type, this.titleForArtifact(item.type), item.content, context.snapshot.id, prompt.spec.id, { type: "platform-ai", id: generated.model }));
     job.status = prompt.evaluation.blockers.length ? "needs-review" : "succeeded"; job.progress = 100; job.stage = prompt.evaluation.blockers.length ? "等待人工确认高风险字段" : "已完成"; job.resultArtifactIds = artifacts.map((item) => item.id); job.updatedAt = nowIso(); this.repo.saveJob(job);
-    const bundle = { id: newId("bundle"), projectId, factSnapshotId: context.snapshot.id, jobId: job.id, artifactIds: job.resultArtifactIds, createdAt: nowIso(), updatedAt: nowIso() };
+    const bundle = { id: newId("bundle"), projectId, factSnapshotId: context.snapshot.id, jobId: job.id, artifactIds: job.resultArtifactIds, provider: textProvider.name, model: generated.model, createdAt: nowIso(), updatedAt: nowIso() };
     this.repo.save("campaign_bundles", bundle, { workspaceId: DEMO_WORKSPACE_ID, projectId, status: job.status });
     return bundle;
   }

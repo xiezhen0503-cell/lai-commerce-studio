@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRef, useState, type ChangeEvent } from "react";
-import { ArrowRight, Check, ChevronRight, Clipboard, FileCheck2, FileText, Film, Image as ImageIcon, Layers3, LoaderCircle, Package, Paperclip, ShieldCheck, Sparkles, WandSparkles } from "lucide-react";
+import { ArrowRight, Bot, Check, ChevronRight, Clipboard, FileCheck2, FileText, Film, Image as ImageIcon, Layers3, LoaderCircle, Package, Paperclip, ShieldCheck, Sparkles, WandSparkles } from "lucide-react";
 import styles from "./beginner-workbench.module.css";
 
 type InitialContext = {
@@ -14,6 +14,7 @@ type InitialContext = {
   sourceNames: string[];
   confirmedFacts: Array<{ type: string; value: string }>;
   pendingFactNames: string[];
+  ai: { mode: "openai" | "mock"; provider: string; model: string; configured: boolean; live: boolean };
 };
 
 type PromptResponse = {
@@ -26,7 +27,10 @@ type PromptResponse = {
 };
 
 type RunResponse = {
-  data?: { artifact: { id: string; title: string; version: { content: string } } };
+  data?: {
+    artifact: { id: string; title: string; version: { content: string } };
+    run: { provider: string; model: string };
+  };
   error?: { message?: string };
 };
 
@@ -39,6 +43,9 @@ type Result = {
   missing: string[];
   artifactId?: string;
   bundleCount?: number;
+  provider: string;
+  model: string;
+  live: boolean;
 };
 
 const taskOptions = [
@@ -108,14 +115,15 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
       const json = await response.json();
       setStage("");
       if (!response.ok) { setError(json.error?.message || "整套内容没有生成成功"); return; }
-      setResult({title:"整套活动已经整理好",content:"方案、短视频脚本、五张主图规划、图片提示词、视频分镜、视频草稿、排期和质量报告已经放进项目。价格、活动时间等高风险字段仍会等待你确认。",score:promptJson.data.evaluation.total,sources:promptJson.data.explanation.sources,facts:promptJson.data.explanation.confirmedFacts,missing:promptJson.data.explanation.missing,bundleCount:json.data?.artifactIds?.length || 0});
+      const model = String(json.data?.model || initial.ai.model);
+      setResult({title:"整套活动已经整理好",content:"方案、短视频脚本、五张主图规划、图片提示词、视频分镜、视频草稿、排期和质量报告已经放进项目。价格、活动时间等高风险字段仍会等待你确认。",score:promptJson.data.evaluation.total,sources:promptJson.data.explanation.sources,facts:promptJson.data.explanation.confirmedFacts,missing:promptJson.data.explanation.missing,bundleCount:json.data?.artifactIds?.length || 0,provider:String(json.data?.provider || initial.ai.provider),model,live:model!=="mock-text-v1"});
     } else {
       setStage("正在生成第一版");
       const response = await fetch("/api/v1/prompts/run",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({projectId:initial.projectId,promptSpecId:promptJson.data.spec.id,artifactType:selectedTask.artifactType})});
       const json = await response.json() as RunResponse;
       setStage("");
       if (!response.ok || !json.data) { setError(json.error?.message || "内容没有生成成功，请再试一次"); return; }
-      setResult({title:json.data.artifact.title,content:json.data.artifact.version.content,score:promptJson.data.evaluation.total,sources:promptJson.data.explanation.sources,facts:promptJson.data.explanation.confirmedFacts,missing:promptJson.data.explanation.missing,artifactId:json.data.artifact.id});
+      setResult({title:json.data.artifact.title,content:json.data.artifact.version.content,score:promptJson.data.evaluation.total,sources:promptJson.data.explanation.sources,facts:promptJson.data.explanation.confirmedFacts,missing:promptJson.data.explanation.missing,artifactId:json.data.artifact.id,provider:json.data.run.provider,model:json.data.run.model,live:json.data.run.model!=="mock-text-v1"});
     }
     setTimeout(() => resultRef.current?.scrollIntoView({behavior:"smooth",block:"start"}),50);
   }
@@ -130,7 +138,12 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
   return <div className={styles.workbench}>
     <header className={styles.intro}>
       <div className={styles.introCopy}>
-        <div className={styles.modePill}><WandSparkles size={14}/> 新手 AI 工作台</div>
+        <div className={styles.modeRow}>
+          <div className={styles.modePill}><WandSparkles size={14}/> 新手 AI 工作台</div>
+          <div className={`${styles.modelPill} ${initial.ai.live ? styles.modelLive : ""}`} aria-label="当前 AI 模型">
+            <span aria-hidden="true"/>{initial.ai.live ? `Codex · ${initial.ai.model}` : "演示模式 · Codex 待配置"}
+          </div>
+        </div>
         <h1>不用学提示词，<br/><span>把想做的事说清楚就行。</span></h1>
         <p>选一个内容类型，确认商品和平台，再用一句话告诉 AI。工作台会自动带上资料、事实和风险边界。</p>
       </div>
@@ -168,7 +181,7 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
         <label className={styles.promptLabel} htmlFor="beginner-objective"><span>用一句话说说你的要求</span><small>{objective.length}/240</small></label>
         <div className={styles.promptBox}>
           <textarea id="beginner-objective" maxLength={240} value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="例如：写一条 30 秒短视频脚本，开头抓人，但不要夸大功效"/>
-          <div className={styles.promptFooter}><div><Sparkles size={13}/><span>AI 会自动加入商品事实、品牌语气和平台要求</span></div><button type="button" onClick={generate} disabled={!ready || Boolean(stage)}>{stage?<LoaderCircle className={styles.spin} size={16}/>:<ArrowRight size={16}/>} {stage || "帮我生成第一版"}</button></div>
+          <div className={styles.promptFooter}><div><Sparkles size={13}/><span>{initial.ai.live ? "Codex 会自动加入商品事实、品牌语气和平台要求" : "演示 AI 会自动加入商品事实；配置服务端密钥后切换 Codex"}</span></div><button type="button" onClick={generate} disabled={!ready || Boolean(stage)}>{stage?<LoaderCircle className={styles.spin} size={16}/>:<ArrowRight size={16}/>} {stage || "帮我生成第一版"}</button></div>
         </div>
         {error && <div className={styles.error} role="alert">{error}</div>}
         <div className={styles.safeNote}><ShieldCheck size={14}/><span>先生成草稿，不会自动发布、花钱或修改店铺。</span><Link href="/prompt-lab">进入专业模式 <ChevronRight size={12}/></Link></div>
@@ -178,8 +191,8 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
     {result && <section className={styles.result} ref={resultRef} aria-live="polite">
       <div className={styles.resultHead}><div><div className={styles.resultEyebrow}><Check size={13}/> 第一版已完成</div><h2>{result.title}</h2><p>{result.bundleCount ? `共整理 ${result.bundleCount} 项内容，已放入当前项目。` : "你可以直接复制，也可以进入完整工作台继续修改。"}</p></div><div className={styles.score}><strong>{result.score}</strong><span>任务完整度</span></div></div>
       <div className={styles.resultBody}>
-        <article className={styles.output}><div className={styles.outputToolbar}><span>{selectedTask.label}</span><button type="button" onClick={copyResult}><Clipboard size={13}/>{copied?"已复制":"复制结果"}</button></div><pre>{result.content}</pre></article>
-        <aside className={styles.evidence}><h3>AI 这次依据了什么</h3><div className={styles.evidenceRow}><span>已确认事实</span><strong>{result.facts.length} 条</strong></div><div className={styles.evidenceRow}><span>引用资料</span><strong>{result.sources.length} 份</strong></div><div className={styles.evidenceRow}><span>待确认</span><strong>{result.missing.length} 项</strong></div>{result.missing.length>0&&<div className={styles.missingBox}>{result.missing.join("；")}</div>}<Link className={styles.projectLink} href={`/projects/${initial.projectId}`}>打开完整项目 <ChevronRight size={13}/></Link></aside>
+        <article className={styles.output}><div className={styles.outputToolbar}><div className={styles.outputIdentity}><span>{selectedTask.label}</span><small><Bot size={12}/>{result.live ? "Codex" : "演示模式"} · {result.model}</small></div><button type="button" onClick={copyResult}><Clipboard size={13}/>{copied?"已复制":"复制结果"}</button></div><pre>{result.content}</pre></article>
+        <aside className={styles.evidence}><h3>AI 这次依据了什么</h3><div className={styles.evidenceRow}><span>当前模型</span><strong>{result.live ? "Codex" : "演示"}</strong></div><div className={styles.evidenceRow}><span>已确认事实</span><strong>{result.facts.length} 条</strong></div><div className={styles.evidenceRow}><span>引用资料</span><strong>{result.sources.length} 份</strong></div><div className={styles.evidenceRow}><span>待确认</span><strong>{result.missing.length} 项</strong></div>{result.missing.length>0&&<div className={styles.missingBox}>{result.missing.join("；")}</div>}<Link className={styles.projectLink} href={`/projects/${initial.projectId}`}>打开完整项目 <ChevronRight size={13}/></Link></aside>
       </div>
     </section>}
 

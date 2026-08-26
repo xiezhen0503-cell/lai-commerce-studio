@@ -24,7 +24,7 @@ pnpm run app:doctor
 pnpm dev
 ```
 
-打开 `http://127.0.0.1:3000`。MCP 服务位于 `http://127.0.0.1:3101/mcp`，A2A 服务位于 `http://127.0.0.1:3102`。仓库默认启用 Mock Provider，无需任何外部密钥即可完成全流程。
+打开 `http://127.0.0.1:3000`。MCP 服务位于 `http://127.0.0.1:3101/mcp`，A2A 服务位于 `http://127.0.0.1:3102`。文本 Provider 默认使用 `auto`：服务端有 `OPENAI_API_KEY` 时调用 Codex 模型，没有密钥时自动保留 Mock 演示链路。
 
 `pnpm run app:setup` 会跨平台创建 `.env`、上传目录和演示数据库，不依赖 PowerShell。若只运行 Web，执行 `pnpm --filter @lai/web dev`。完整 Mac 安装、Apple Silicon 排错和 Windows→Mac 迁移见 [macOS 安装指南](docs/macos-setup.md)。
 
@@ -35,7 +35,7 @@ pnpm dev
 3. 在结果旁查看 AI 使用了多少份资料、多少条已确认事实，以及还有哪些内容不能擅自补写。
 4. 需要精细控制时再进入“专业模式”；提示词工坊、任务、审核、智能体和接口能力都收在高级功能里。
 
-首页预置虚构商品与 Mock Provider，不需要 API key 就能体验完整交互。接入真实品牌前请替换演示资料；接入真实大模型时请在服务端环境变量或秘密管理服务中配置 Provider，不要把密钥提交到 GitHub。
+首页预置虚构商品，不需要 API key 就能体验完整交互。要启用 Codex，把 `OPENAI_API_KEY` 配置在服务端环境变量或秘密管理服务中；默认模型是 `gpt-5.6-sol`，通过 OpenAI Responses API 调用。不要把密钥写进网页、`.env.example` 或提交到 GitHub。
 
 > Codespaces 只用于运行个人开发环境。端口保持默认的 **Private**；在接入 Session/OIDC 等生产鉴权之前，不要把工作台端口改成 Public。
 
@@ -78,13 +78,14 @@ pnpm build
 |---|---|---|
 | 项目、品牌、商品、资料上传、事实/快照、PromptSpec、物料版本、任务、审核、权限与审计 | 已真实实现，本地 SQLite 持久化 | 无 |
 | Web、REST、MCP Streamable HTTP、A2A 1.0、SSE、HMAC Webhook 示例 | 已真实实现并通过运行态验证 | 无 |
-| 文案、图片、语音、视频与文档 Provider | Mock 演示；输出可复现，不产生真实费用 | 无 API Key、无 GPU |
+| 中文文案生成 | OpenAI Responses API 已实现；默认使用 Codex `gpt-5.6-sol`，无 Key 时自动回退 Mock | 服务端 `OPENAI_API_KEY` |
+| 图片、语音、视频与文档 Provider | Mock 演示；输出可复现，不产生真实费用 | 无 API Key、无 GPU |
 | Remotion | 三个模板和浏览器 Player 预览已实现 | 本地预览不需要 GPU；服务端批量渲染需独立部署，并核验 Remotion 许可 |
-| OpenAI / Anthropic / Gemini | Adapter 和配置状态已实现，默认关闭 | 需要对应 API Key |
+| Anthropic / Gemini | Adapter 和配置状态已实现，默认关闭 | 需要对应 API Key |
 | Docling / RAGFlow / Dify / ComfyUI / n8n / Langfuse | Adapter 边界和配置页已实现，默认关闭 | 需要独立部署；ComfyUI 通常需要 GPU；部分产品有商业或分发限制 |
 | 真实电商平台发布 | 未实现，且不由本项目自动执行 | 下一阶段需平台授权、当期规则审核和发布前人工确认 |
 
-可选服务未配置时明确显示“未配置”，不会伪装连接成功，也不会阻断 Mock 主流程。
+Codex 未配置时首页明确显示“演示模式”，不会伪装连接成功，也不会阻断 Mock 主流程；配置成功后页面显示实际模型名。
 
 ## REST、MCP 与 A2A 接入
 
@@ -105,7 +106,7 @@ MCP 客户端使用 [`docs/examples/mcp.json`](docs/examples/mcp.json)，服务�
 
 ## 生产部署
 
-构建后运行 `pnpm start`。生产环境必须设置随机 `AGENT_TOKEN_PEPPER` 与 `WEBHOOK_SECRET`，接入 HTTPS/OIDC、真实病毒扫描、对象存储、队列 Worker、备份、出站 allowlist 和集中审计；删除演示 Token 与虚构数据。`docker-compose.example.yml` 只演示进程和环境变量，不是生产安全基线。
+构建后运行 `pnpm start`。生产环境必须设置随机 `AGENT_TOKEN_PEPPER` 与 `WEBHOOK_SECRET`；启用 Codex 时再从托管平台的 Secret 配置 `OPENAI_API_KEY`。本项目包含服务端 API 和 SQLite，不能直接作为纯静态 GitHub Pages 运行。正式公开前还要接入 HTTPS/OIDC、对象存储、队列 Worker、备份、出站 allowlist 和集中审计，并删除演示 Token 与虚构数据。`docker-compose.example.yml` 只演示进程和环境变量，不是生产安全基线。
 
 ## 已知限制
 
@@ -133,4 +134,4 @@ MCP 客户端使用 [`docs/examples/mcp.json`](docs/examples/mcp.json)，服务�
 
 ## 真实边界
 
-外部模型、Docling、ComfyUI、Remotion Server Render 等集成目前提供接口、配置页和 Adapter，默认不主动调用。公开发布、付费生成、覆盖、删除、事实确认和批准始终需要明确的人类动作。这里的品牌、商品、数据和账号均为虚构演示。
+OpenAI 文本模型已提供真实 Responses API 调用；只有服务端存在 `OPENAI_API_KEY` 时才会启用。Docling、ComfyUI、Remotion Server Render 等其他外部集成目前提供接口、配置页和 Adapter，默认不主动调用。公开发布、覆盖、删除、事实确认和批准始终需要明确的人类动作。这里的品牌、商品、数据和账号均为虚构演示。

@@ -4,6 +4,7 @@ import { expect, test } from "@playwright/test";
 test("新手工作台可以从一句话生成第一版内容", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /不用学提示词/ })).toBeVisible();
+  await expect(page.getByLabel("当前 AI 模型")).toContainText(/Codex|演示模式/);
   await expect(page.getByLabel("AI 内容生成工作台")).toContainText("本次使用的资料");
   await page.getByRole("button", { name: /活动方案/ }).click();
   await page.getByLabel("用一句话说说你的要求").fill("为草莓燕麦杯做一份 7 天新品上市方案，价格未确认时必须留空");
@@ -24,7 +25,7 @@ test("新手工作台可以从一句话生成第一版内容", async ({ page }) 
   await page.getByRole("button", { name: "交给其他智能体" }).click();
   await expect(page.getByText("交接包已创建", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "立即运行" }).click();
-  await expect(page.getByText("Mock Provider 生成成果草稿", { exact: false })).toBeVisible();
+  await expect(page.getByText("演示模式 生成成果草稿", { exact: false })).toBeVisible();
 });
 
 test("项目事实和 API 文档页面可访问", async ({ page }) => {
@@ -44,4 +45,6 @@ test("项目事实和 API 文档页面可访问", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "接口与智能体接入", exact: true })).toBeVisible();
   const response = await page.request.get("/api/v1/health");
   expect(response.ok()).toBeTruthy();
+  const health = await response.json();
+  expect(health.data.providers.text).toMatchObject({ mode: "mock", model: "mock-text-v1", live: false });
 });
