@@ -7,6 +7,19 @@ export const ALLOWED_FILE_TYPES = new Map([
   ["text/csv", ".csv"], ["text/plain", ".txt"], ["text/markdown", ".md"], ["image/jpeg", ".jpg"], ["image/png", ".png"]
 ]);
 
+const BROWSER_GENERIC_FILE_TYPES = new Set(["", "application/octet-stream"]);
+const SAFE_TEXT_TYPE_BY_EXTENSION = new Map([
+  [".csv", "text/csv"], [".md", "text/markdown"], [".txt", "text/plain"]
+]);
+
+export function normalizeUploadMimeType(input: { name: string; type: string }) {
+  const extension = path.extname(input.name).toLowerCase();
+  if (input.type === "text/x-markdown") return "text/markdown";
+  if (input.type === "text/plain" && extension !== ".txt") return SAFE_TEXT_TYPE_BY_EXTENSION.get(extension) || input.type;
+  if (!BROWSER_GENERIC_FILE_TYPES.has(input.type)) return input.type;
+  return SAFE_TEXT_TYPE_BY_EXTENSION.get(extension) || input.type;
+}
+
 export function sanitizeFilename(input: string) {
   // Control characters are intentionally rejected at the filesystem boundary.
   // eslint-disable-next-line no-control-regex
@@ -18,11 +31,12 @@ export function sanitizeFilename(input: string) {
 
 export function validateUpload(input: { name: string; type: string; size: number }, maxMb = Number(process.env.UPLOAD_MAX_MB || 20)) {
   const safeName = sanitizeFilename(input.name);
-  const expected = ALLOWED_FILE_TYPES.get(input.type);
+  const mimeType = normalizeUploadMimeType({ name: safeName, type: input.type });
+  const expected = ALLOWED_FILE_TYPES.get(mimeType);
   if (!expected) throw new Error("不支持这种文件类型，请上传 PDF、Office、文本、表格或 JPG/PNG");
   if (input.size <= 0 || input.size > maxMb * 1024 * 1024) throw new Error(`文件大小必须在 1 字节到 ${maxMb}MB 之间`);
   const extension = path.extname(safeName).toLowerCase();
-  if (input.type !== "text/plain" && extension !== expected && !(input.type === "image/jpeg" && extension === ".jpeg")) throw new Error("文件扩展名与内容类型不一致");
+  if (extension !== expected && !(mimeType === "image/jpeg" && extension === ".jpeg")) throw new Error("文件扩展名与内容类型不一致");
   return safeName;
 }
 

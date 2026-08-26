@@ -30,8 +30,10 @@ test("新手工作台可以从一句话生成第一版内容", async ({ page }) 
 test("项目事实和 API 文档页面可访问", async ({ page }) => {
   await page.goto("/projects/prj_qingmai_launch");
   await expect(page.getByRole("heading", { name: "青麦脆夏日上新" })).toBeVisible();
+  const uploadResponse = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/sources"));
   await page.getByLabel("上传项目资料").setInputFiles(path.resolve("tests/fixtures/e2e-product-sheet.md"));
-  await expect(page.getByText("已解析 e2e-product-sheet.md", { exact: false })).toBeVisible();
+  expect((await uploadResponse).ok()).toBeTruthy();
+  await expect(page.getByText("已解析 e2e-product-sheet.md", { exact: false })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole("button", { name: "事实卡", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "当前事实快照", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "生成整套活动" }).click();
