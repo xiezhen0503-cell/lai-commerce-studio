@@ -3,6 +3,23 @@ import { expect, test } from "@playwright/test";
 
 const accessPath = "/access/e2e-workbench-access";
 
+async function createIsolatedProject(page: import("@playwright/test").Page, suffix: string) {
+  const response = await page.request.post("/api/v1/projects", {
+    data: {
+      name: `商业 Demo 验收 ${suffix}`,
+      type: "新品上市",
+      brandId: "brand_wuqinggu",
+      productIds: ["product_qingmaicui"],
+      objective: "验证资料上传到成果审核导出的完整商业链路",
+      businessGoal: "工程验收",
+      targetPlatforms: ["小红书", "抖音"],
+      targetAudience: "商业 Demo 测试用户"
+    }
+  });
+  expect(response.status()).toBe(201);
+  return (await response.json()).data.id as string;
+}
+
 test("新手工作台可以从一句话生成第一版内容", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "请使用小赖的专属测试链接" })).toBeVisible();
@@ -49,9 +66,11 @@ test("项目事实和 API 文档页面可访问", async ({ page }) => {
   const uploadResponse = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/sources"));
   await page.getByLabel("上传项目资料").setInputFiles(path.resolve("tests/fixtures/e2e-product-sheet.md"));
   expect((await uploadResponse).ok()).toBeTruthy();
-  await expect(page.getByText("已解析 e2e-product-sheet.md", { exact: false })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("status")).toContainText("已解析 1 份资料", { timeout: 15_000 });
+  await expect(page.getByText("e2e-product-sheet.md", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "事实卡", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "当前事实快照", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "总览", exact: true }).click();
   await page.getByRole("button", { name: "生成整套活动" }).click();
   await expect(page.getByText("整套活动已生成", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "提交审核" }).click();
@@ -62,4 +81,66 @@ test("项目事实和 API 文档页面可访问", async ({ page }) => {
   expect(response.ok()).toBeTruthy();
   const health = await response.json();
   expect(health.data.providers.text).toMatchObject({ mode: "mock", model: "mock-text-v1", live: false });
+});
+
+test("商业 Demo 的资料、事实、版本、图片、视频、审核和导出均可操作", async ({ page }, testInfo) => {
+  test.slow();
+  const fileName = `商业验收-${testInfo.project.name}.md`;
+  await page.goto(accessPath);
+  const projectId = await createIsolatedProject(page, `${testInfo.project.name}-${Date.now()}`);
+  await page.goto(`/projects/${projectId}`);
+  await page.getByLabel("上传项目资料").setInputFiles({
+    name: fileName,
+    mimeType: "text/markdown",
+    buffer: Buffer.from("商品名称：商业验收燕麦杯\n规格：50克×6杯\n活动价：29.9元\n活动时间：2026-10-01 至 2026-10-07\n主要配料：燕麦片、草莓粒", "utf8")
+  });
+  await expect(page.getByText(fileName, { exact: true })).toBeVisible({ timeout: 15_000 });
+
+  const textPreview = page.getByRole("link", { name: `查看解析正文 ${fileName}` });
+  const previewHref = await textPreview.getAttribute("href");
+  expect(previewHref).toBeTruthy();
+  const previewResponse = await page.request.get(previewHref!);
+  expect(previewResponse.ok()).toBeTruthy();
+  expect(await previewResponse.text()).toContain("活动价：29.9元");
+
+  await page.getByRole("button", { name: "事实卡", exact: true }).click();
+  const extractedPrice = page.locator("section.pane .fact-card").filter({ hasText: "活动价" }).filter({ hasText: "29.9" }).first();
+  await expect(extractedPrice).toBeVisible();
+  await extractedPrice.getByRole("button", { name: "人工确认" }).click();
+  await expect(page.getByText("活动价已确认", { exact: false })).toBeVisible();
+
+  await page.getByRole("button", { name: "总览", exact: true }).click();
+  await page.getByRole("button", { name: "生成整套活动" }).click();
+  await expect(page.getByText("整套活动已生成", { exact: false })).toBeVisible({ timeout: 20_000 });
+
+  await page.getByRole("button", { name: "图片", exact: true }).click();
+  await expect(page.getByRole("img", { name: /主图预览/ })).toBeVisible();
+  await page.getByRole("button", { name: "视频", exact: true }).click();
+  await expect(page.getByRole("link", { name: "打开可播放预览" })).toHaveAttribute("href", /video-preview/);
+
+  await page.getByRole("button", { name: "方案", exact: true }).click();
+  await page.getByRole("button", { name: "编辑", exact: true }).click();
+  const editor = page.locator("textarea").last();
+  await editor.fill("# 人工修订商业验收方案\n\n这段内容由测试用户保存，用于验证版本化编辑。 ");
+  await page.getByRole("button", { name: "保存新版本" }).click();
+  await expect(page.getByText("人工修改已保存为", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "提交审核" }).click();
+  await expect(page.getByText("已提交人工审核", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "复核", exact: true }).click();
+  page.once("dialog", (dialog) => dialog.accept("商业 Demo 工程验收"));
+  await page.getByRole("button", { name: "批准", exact: true }).first().click();
+  await expect(page.getByText("成果已批准", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "导出", exact: true }).click();
+  const exportHref = await page.getByRole("link", { name: "下载", exact: true }).first().getAttribute("href");
+  const exportResponse = await page.request.get(exportHref!);
+  expect(exportResponse.ok()).toBeTruthy();
+  expect(exportResponse.headers()["content-type"]).toContain("text/markdown");
+
+  await page.getByRole("button", { name: "资料", exact: true }).click();
+  const sourceRow = page.locator("li.list-item").filter({ hasText: fileName });
+  page.once("dialog", (dialog) => dialog.accept());
+  await sourceRow.getByRole("button", { name: `删除 ${fileName}` }).click();
+  await expect(page.getByText(`已删除 ${fileName}`, { exact: false })).toBeVisible();
 });

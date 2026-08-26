@@ -71,7 +71,9 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
   const [platforms,setPlatforms] = useState(initial.platforms);
   const [sourceCount,setSourceCount] = useState(initial.sourceNames.length);
   const [factCount,setFactCount] = useState(initial.confirmedFacts.length);
-  const [pendingNames] = useState(initial.pendingFactNames);
+  const [factRows,setFactRows] = useState(initial.confirmedFacts);
+  const [pendingNames,setPendingNames] = useState(initial.pendingFactNames);
+  const [uploadSummary,setUploadSummary] = useState("");
   const [stage,setStage] = useState("");
   const [error,setError] = useState("");
   const [result,setResult] = useState<Result>();
@@ -94,19 +96,36 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
   }
 
   async function upload(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setError("");
-    setStage("正在读资料");
-    const form = new FormData();
-    form.set("file",file);
-    const response = await fetch(`/api/v1/projects/${initial.projectId}/sources`,{method:"POST",body:form});
-    const json = await response.json();
+    const files = Array.from(event.target.files || []);
     event.target.value = "";
+    if (!files.length) return;
+    setError("");
+    setUploadSummary("");
+    let succeeded = 0;
+    let extracted = 0;
+    const failures: string[] = [];
+    for (const [index,file] of files.entries()) {
+      setStage(`正在读资料 ${index + 1}/${files.length}`);
+      const form = new FormData();
+      form.set("file",file);
+      const response = await fetch(`/api/v1/projects/${initial.projectId}/sources`,{method:"POST",body:form});
+      const json = await response.json();
+      if (response.ok) { succeeded += 1; extracted += json.data?.facts?.length || 0; }
+      else failures.push(`${file.name}：${json.error?.message || json.data?.source?.error || "上传失败"}`);
+    }
     setStage("");
-    if (!response.ok) { setError(json.error?.message || "资料没有上传成功，请检查格式和大小"); return; }
-    setSourceCount((count) => count + 1);
-    setFactCount((count) => count + (json.data?.facts?.length || 0));
+    if (failures.length) setError(failures.join("；"));
+    setUploadSummary(`已保存并解析 ${succeeded} 份资料，新增 ${extracted} 条事实候选。可进入完整项目查看原文、警告和来源。`);
+    const projectResponse = await fetch(`/api/v1/projects/${initial.projectId}`);
+    const projectJson = await projectResponse.json();
+    if (projectResponse.ok) {
+      const facts = projectJson.data.facts as Array<{type:string;value:string;status:string}>;
+      const confirmed = facts.filter((fact) => ["verified","user-confirmed"].includes(fact.status));
+      setSourceCount(projectJson.data.sources.length);
+      setFactCount(confirmed.length);
+      setFactRows(confirmed.map((fact) => ({type:fact.type,value:fact.value})));
+      setPendingNames(facts.filter((fact) => ["missing","conflicting","expired"].includes(fact.status)).map((fact) => fact.type));
+    }
   }
 
   async function generate() {
@@ -168,10 +187,11 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
           <div><strong>{factCount}</strong><span>条可用事实</span></div>
         </div>
         <div className={styles.factList}>
-          {initial.confirmedFacts.slice(0,4).map((fact) => <div key={fact.type}><Check size={12}/><span>{fact.type}</span><strong>{fact.value}</strong></div>)}
+          {factRows.slice(0,4).map((fact) => <div key={`${fact.type}-${fact.value}`}><Check size={12}/><span>{fact.type}</span><strong>{fact.value}</strong></div>)}
         </div>
         {pendingNames.length > 0 && <div className={styles.pending}><FileCheck2 size={14}/><span>{pendingNames.join("、")}仍待确认，AI 不会擅自补写</span></div>}
-        <label className={styles.uploadButton}><Paperclip size={14}/>{stage === "正在读资料" ? "正在读资料…" : "再补一份商品资料"}<input type="file" accept=".pdf,.docx,.pptx,.xlsx,.csv,.txt,.md,.jpg,.jpeg,.png" onChange={upload}/></label>
+        <label className={styles.uploadButton}><Paperclip size={14}/>{stage.startsWith("正在读资料") ? `${stage}…` : "补充商品资料（可多选）"}<input type="file" multiple accept=".pdf,.docx,.pptx,.xlsx,.csv,.txt,.md,.jpg,.jpeg,.png" onChange={upload}/></label>
+        {uploadSummary&&<div className={styles.pending}><FileCheck2 size={14}/><span>{uploadSummary}</span></div>}
       </aside>
 
       <main className={styles.composer}>

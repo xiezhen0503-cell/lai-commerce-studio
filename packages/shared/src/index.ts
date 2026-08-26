@@ -48,7 +48,7 @@ export function seedDemoData(repo = getRepository()) {
     status: "needs-input", createdAt: now, updatedAt: now
   };
   repo.saveProject(project);
-  const source: SourceDocument = { id: "src_demo_product_sheet", workspaceId: DEMO_WORKSPACE_ID, projectId: project.id, fileName: "虚构商品资料单-v1.md", mimeType: "text/markdown", size: 812, parser: "mock-document-parser-v1", status: "parsed", storagePath: "demo://product-sheet", extractedText: "商品名称：青麦脆·草莓燕麦杯\n规格：45克×6杯\n主要配料：燕麦片、冻干草莓粒、乳粉\n产地：浙江湖州（虚构演示）", createdAt: now, parsedAt: now };
+  const source: SourceDocument = { id: "src_demo_product_sheet", workspaceId: DEMO_WORKSPACE_ID, projectId: project.id, fileName: "虚构商品资料单-v1.md", mimeType: "text/markdown", size: 812, parser: "local-document-parser-v1", status: "parsed", storagePath: "demo://product-sheet", extractedText: "商品名称：青麦脆·草莓燕麦杯\n规格：45克×6杯\n主要配料：燕麦片、冻干草莓粒、乳粉\n产地：浙江湖州（虚构演示）", createdAt: now, parsedAt: now };
   repo.saveSource(source);
   const facts: Fact[] = [
     { id: "fact_product_name", projectId: project.id, type: "商品名称", value: product.name, status: "verified", confidence: .99, sourceDocumentId: source.id, sourcePosition: "第1行", sourceQuote: `商品名称：${product.name}`, confirmedByUser: false, createdAt: now, updatedAt: now },
@@ -124,21 +124,72 @@ export class CommerceService {
 
   saveSource(source: SourceDocument) { this.repo.saveSource(source); audit("source.uploaded", { fileName: source.fileName }, { actorId: "user_lai", actorType: "human", projectId: source.projectId, repo: this.repo }); return source; }
 
+  deleteSource(projectId: string, sourceId: string) {
+    const source = this.repo.get<SourceDocument>("source_documents", sourceId);
+    if (!source || source.projectId !== projectId) throw new CommerceError("SOURCE_NOT_FOUND", "没有找到这份项目资料", 404);
+    const updatedAt = nowIso();
+    const affectedFacts = this.repo.listFacts(projectId).filter((fact) => fact.sourceDocumentId === sourceId && !fact.confirmedByUser);
+    affectedFacts.forEach((fact) => this.repo.saveFact(FactSchema.parse({ ...fact, status: "expired", updatedAt })));
+    this.repo.delete("source_documents", sourceId);
+    const snapshot = createFactSnapshot(projectId, "user_lai", this.repo);
+    const project = this.getProject(projectId).project;
+    project.currentFactSnapshotId = snapshot.id;
+    project.updatedAt = updatedAt;
+    this.repo.saveProject(project);
+    const affectedArtifacts = this.repo.listArtifacts(projectId).filter((artifact) => !artifact.humanModified);
+    affectedArtifacts.forEach((artifact) => this.repo.saveArtifact({ ...artifact, status: "stale", updatedAt }));
+    audit("source.deleted", { sourceId, fileName: source.fileName, expiredFacts: affectedFacts.map((fact) => fact.id) }, { actorId: "user_lai", actorType: "human", projectId, repo: this.repo });
+    return { deleted: true, sourceId, snapshotId: snapshot.id, expiredFactIds: affectedFacts.map((fact) => fact.id), affectedArtifactIds: affectedArtifacts.map((artifact) => artifact.id) };
+  }
+
   extractFacts(projectId: string, sourceId: string) {
     const source = this.repo.get<SourceDocument>("source_documents", sourceId);
     if (!source || source.projectId !== projectId) throw new CommerceError("SOURCE_NOT_FOUND", "没有找到这份项目资料", 404);
     const text = source.extractedText || "";
-    const patterns = [{ type: "规格", regex: /规格[:：]\s*([^\n]+)/ }, { type: "活动价", regex: /(?:活动价|价格)[:：]\s*([\d.]+)\s*元?/ }, { type: "主要配料", regex: /(?:主要配料|配料)[:：]\s*([^\n]+)/ }, { type: "产地", regex: /产地[:：]\s*([^\n]+)/ }];
+    const patterns = [
+      { type: "商品名称", regex: /(?:^|\n)\s*(?:商品名称|产品名称)[:：\t]\s*([^\n\t]+)/i },
+      { type: "品类", regex: /(?:^|\n)\s*(?:品类|商品分类|产品分类)[:：\t]\s*([^\n\t]+)/i },
+      { type: "SKU", regex: /(?:^|\n)\s*(?:SKU|货号)[:：\t]\s*([^\n\t]+)/i },
+      { type: "规格", regex: /(?:^|\n)\s*(?:商品规格|产品规格|规格)[:：\t]\s*([^\n\t]+)/i },
+      { type: "包装数量", regex: /(?:^|\n)\s*(?:包装数量|装箱数|包装规格)[:：\t]\s*([^\n\t]+)/i },
+      { type: "活动价", regex: /(?:^|\n)\s*(?:活动价|促销价|到手价|价格)[:：\t]\s*(?:¥|￥)?\s*([\d.]+)\s*元?/i, unit: "元" },
+      { type: "成本", regex: /(?:^|\n)\s*(?:成本|采购成本)[:：\t]\s*(?:¥|￥)?\s*([\d.]+)\s*元?/i, unit: "元" },
+      { type: "库存", regex: /(?:^|\n)\s*(?:库存|可售库存)[:：\t]\s*([\d.]+\s*[^\n\t]*)/i },
+      { type: "主要配料", regex: /(?:^|\n)\s*(?:主要配料|配料表|配料|成分)[:：\t]\s*([^\n\t]+)/i },
+      { type: "产地", regex: /(?:^|\n)\s*(?:产地|生产地)[:：\t]\s*([^\n\t]+)/i },
+      { type: "材质", regex: /(?:^|\n)\s*(?:材质|主要材质)[:：\t]\s*([^\n\t]+)/i },
+      { type: "使用方法", regex: /(?:^|\n)\s*(?:使用方法|食用方法)[:：\t]\s*([^\n\t]+)/i },
+      { type: "适用人群", regex: /(?:^|\n)\s*(?:适用人群|目标人群)[:：\t]\s*([^\n\t]+)/i },
+      { type: "活动时间", regex: /(?:^|\n)\s*(?:活动时间|活动日期|促销时间)[:：\t]\s*([^\n\t]+)/i },
+      { type: "资质", regex: /(?:^|\n)\s*(?:资质|许可证|认证)[:：\t]\s*([^\n\t]+)/i },
+      { type: "检测报告", regex: /(?:^|\n)\s*(?:检测报告|报告编号)[:：\t]\s*([^\n\t]+)/i },
+      { type: "商品卖点", regex: /(?:^|\n)\s*(?:商品卖点|核心卖点|卖点)[:：\t]\s*([^\n\t]+)/i },
+      { type: "禁用宣称", regex: /(?:^|\n)\s*(?:禁用宣称|禁用词|禁止表述)[:：\t]\s*([^\n\t]+)/i },
+      { type: "预算", regex: /(?:^|\n)\s*(?:预算|投放预算)[:：\t]\s*(?:¥|￥)?\s*([\d.]+)\s*元?/i, unit: "元" },
+      { type: "KPI", regex: /(?:^|\n)\s*(?:核心KPI|KPI|目标指标)[:：\t]\s*([^\n\t]+)/i }
+    ];
     const existing = this.repo.listFacts(projectId);
     const created: Fact[] = [];
     for (const pattern of patterns) {
       const match = text.match(pattern.regex);
       if (!match?.[1]) continue;
-      const current = existing.find((fact) => fact.type === pattern.type);
       const value = match[1].trim();
+      const duplicate = existing.find((fact) => fact.sourceDocumentId === source.id && fact.type === pattern.type && fact.value === value);
+      if (duplicate) { created.push(duplicate); continue; }
+      const current = existing.find((fact) => fact.type === pattern.type && fact.value && !["expired","missing"].includes(fact.status));
       const status = current?.value && current.value !== value ? "conflicting" : "inferred";
-      const fact = FactSchema.parse({ id: newId("fact"), projectId, type: pattern.type, value, unit: pattern.type === "活动价" ? "元" : undefined, status, confidence: .78, sourceDocumentId: source.id, sourcePosition: "文本匹配", sourceQuote: match[0], confirmedByUser: false, conflictGroupId: status === "conflicting" ? newId("conflict") : undefined, createdAt: nowIso(), updatedAt: nowIso() });
+      const line = text.slice(0, match.index ?? 0).split("\n").length;
+      const fact = FactSchema.parse({ id: newId("fact"), projectId, type: pattern.type, value, unit: pattern.unit, status, confidence: .78, sourceDocumentId: source.id, sourcePosition: `第 ${line} 行`, sourceQuote: match[0].trim(), confirmedByUser: false, conflictGroupId: status === "conflicting" ? (current?.conflictGroupId || newId("conflict")) : undefined, createdAt: nowIso(), updatedAt: nowIso() });
       this.repo.saveFact(fact); created.push(fact);
+    }
+    if (created.length) {
+      const snapshot = createFactSnapshot(projectId, "platform", this.repo);
+      const project = this.getProject(projectId).project;
+      project.currentFactSnapshotId = snapshot.id;
+      project.status = snapshot.facts.some((fact) => ["missing","conflicting"].includes(fact.status)) ? "needs-input" : project.status;
+      project.updatedAt = nowIso();
+      this.repo.saveProject(project);
+      this.repo.listArtifacts(projectId).filter((artifact) => artifact.factSnapshotId !== snapshot.id && !artifact.humanModified).forEach((artifact) => this.repo.saveArtifact({ ...artifact, status: "stale", updatedAt: nowIso() }));
     }
     audit("fact.extracted", { sourceId, count: created.length }, { actorId: "platform", actorType: "platform", projectId, repo: this.repo });
     return created;
@@ -269,13 +320,19 @@ export class CommerceService {
     const prompt = this.generatePrompt(projectId, objective);
     const textProvider = providerRegistry.text;
     const generated = await textProvider.generate(prompt.spec, compilePrompt(context));
-    const items: Array<{ type: z.infer<typeof ArtifactTypeValidator>; content: string }> = [
-      { type: "proposal", content: generated.text }, { type: "script", content: this.mockScript(context) }, { type: "storyboard", content: JSON.stringify(this.mockStoryboard(context), null, 2) },
+    const storyboard = this.mockStoryboard(context) as Array<{ index: number; headline: string; composition: string; overlay: string }>;
+    const visualPreviews = await Promise.all(storyboard.map(async (frame) => ({ frame, image: await providerRegistry.image.generate({ prompt: `${frame.headline}｜${frame.composition}`, width: 1080, height: 1080 }) })));
+    const items: Array<{ type: z.infer<typeof ArtifactTypeValidator>; content: string; title?: string }> = [
+      { type: "proposal", content: generated.text }, { type: "script", content: this.mockScript(context) }, { type: "storyboard", content: JSON.stringify(storyboard, null, 2) },
       { type: "image-prompt", content: `保持真实商品包装不变。场景：晨间通勤桌面；光线：柔和侧光；品牌色：${context.brand.colors.join("、")}；价格、规格、Logo、CTA 不进入生成画面，交由程序化图层叠加。` },
       { type: "video-storyboard", content: JSON.stringify(this.mockStoryboard(context, true), null, 2) }, { type: "video", content: JSON.stringify({ template: "Promo30", props: { product: context.products[0]?.name, specification: context.products[0]?.specification, factSnapshotId: context.snapshot.id } }, null, 2) },
-      { type: "schedule", content: "第1–2天：素材与开场稿；第3–5天：小流量测试；第6–7天：复盘；第8–14天：胜出内容扩量。" }, { type: "report", content: `事实快照：${context.snapshot.id}\n阻断项：${prompt.evaluation.blockers.join("、") || "无"}\n人工审核：必需` }
+      { type: "schedule", content: "第1–2天：素材与开场稿；第3–5天：小流量测试；第6–7天：复盘；第8–14天：胜出内容扩量。" }, { type: "report", content: `事实快照：${context.snapshot.id}\n阻断项：${prompt.evaluation.blockers.join("、") || "无"}\n人工审核：必需` },
+      ...visualPreviews.map(({ frame, image }) => ({ type: "image" as const, title: `主图预览 ${frame.index}｜${frame.headline}`, content: JSON.stringify({ assetUri: image.assetUri, metadata: image.metadata, storyboard: frame, factSnapshotId: context.snapshot.id }) }))
     ];
-    const artifacts = items.map((item) => this.createArtifact(projectId, item.type, this.titleForArtifact(item.type), item.content, context.snapshot.id, prompt.spec.id, { type: "platform-ai", id: generated.model }));
+    const artifacts = items.map((item) => {
+      const creatorId = item.type === "proposal" ? generated.model : item.type === "image" ? providerRegistry.image.name : item.type === "video" ? "remotion-template-v1" : "deterministic-campaign-engine-v1";
+      return this.createArtifact(projectId, item.type, item.title || this.titleForArtifact(item.type), item.content, context.snapshot.id, prompt.spec.id, { type: "platform-ai", id: creatorId });
+    });
     job.status = prompt.evaluation.blockers.length ? "needs-review" : "succeeded"; job.progress = 100; job.stage = prompt.evaluation.blockers.length ? "等待人工确认高风险字段" : "已完成"; job.resultArtifactIds = artifacts.map((item) => item.id); job.updatedAt = nowIso(); this.repo.saveJob(job);
     const bundle = { id: newId("bundle"), projectId, factSnapshotId: context.snapshot.id, jobId: job.id, artifactIds: job.resultArtifactIds, provider: textProvider.name, model: generated.model, createdAt: nowIso(), updatedAt: nowIso() };
     this.repo.save("campaign_bundles", bundle, { workspaceId: DEMO_WORKSPACE_ID, projectId, status: job.status });
@@ -324,7 +381,14 @@ export class CommerceService {
     if (!result.allowed) throw new CommerceError(result.code, result.reason, 403);
   }
 
-  revokeAgent(agentId: string) { const ok = this.repo.revokeToken(agentId); audit("agent.token.revoked", { agentId }, { actorId: "user_lai", actorType: "human", repo: this.repo }); return ok; }
+  revokeAgent(agentId: string) {
+    const account = this.repo.get<any>("agent_service_accounts", agentId);
+    const revoked = this.repo.revokeToken(agentId);
+    if (account) this.repo.save("agent_service_accounts", { ...account, status: "revoked", revokedAt: nowIso(), updatedAt: nowIso() }, { workspaceId: DEMO_WORKSPACE_ID, status: "revoked", revokedAt: nowIso() });
+    this.repo.list<any>("agent_connections").filter((connection) => connection.agentServiceAccountId === agentId).forEach((connection) => this.repo.save("agent_connections", { ...connection, status: "revoked", updatedAt: nowIso() }, { workspaceId: DEMO_WORKSPACE_ID, status: "revoked", parentId: agentId }));
+    audit("agent.token.revoked", { agentId }, { actorId: "user_lai", actorType: "human", repo: this.repo });
+    return revoked;
+  }
 
   buildHandoff(projectId: string, promptSpecId: string, objective: string, scopes: Scope[] = ["project:read", "source:read", "fact:read", "artifact:write"]) {
     const project = this.getProject(projectId).project;

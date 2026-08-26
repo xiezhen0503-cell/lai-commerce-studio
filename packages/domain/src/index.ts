@@ -62,7 +62,7 @@ export type Project = z.infer<typeof ProjectSchema>;
 export const SourceDocumentSchema = z.object({
   id: z.string(), workspaceId: z.string(), projectId: z.string(), fileName: z.string(), mimeType: z.string(), size: z.number().int().nonnegative(),
   parser: z.string(), status: z.enum(["uploaded", "parsing", "parsed", "failed", "quarantined"]), storagePath: z.string(), extractedText: z.string().optional(),
-  createdAt: z.string().datetime(), parsedAt: z.string().datetime().optional(), error: z.string().optional()
+  createdAt: z.string().datetime(), parsedAt: z.string().datetime().optional(), error: z.string().optional(), warnings: z.array(z.string()).optional()
 });
 export type SourceDocument = z.infer<typeof SourceDocumentSchema>;
 

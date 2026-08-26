@@ -5,6 +5,11 @@
 | 项目 | 许可证/条款 | 本项目决策 |
 |---|---|---|
 | Next.js、Zod、better-sqlite3、MCP TypeScript SDK | 各自开源许可（以 lockfile 与包内 LICENSE 为准） | 运行依赖，发布前生成最终 SBOM/NOTICE |
+| unpdf | MIT（内含面向 serverless 的 PDF.js 构建） | 运行依赖，用于提取 PDF 文本层；扫描件仍需视觉识别 |
+| Mammoth.js | BSD-2-Clause | 运行依赖，用于提取 DOCX 原始文本，不承诺保留复杂版式 |
+| ExcelJS | MIT | 运行依赖，用于读取 XLSX 工作表与单元格显示值 |
+| JSZip | MIT 或 GPL-3.0 双许可，本项目选择 MIT | 运行依赖，用于读取 PPTX Open XML 文本 |
+| docx、pdf-lib | 各自宽松开源许可（仅开发依赖） | 只用于测试中生成无业务数据的 DOCX/PDF 样本，不进入线上解析链路 |
 | nexscope-ai/eCommerce-Skills | MIT | 仅参考技能分层，不复制内容 |
 | ecommerce-visual-copywriting-skill | MIT | 仅参考视觉文案任务边界 |
 | MoneyPrinterTurbo | MIT | 仅参考视频流水线分层 |

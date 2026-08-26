@@ -53,9 +53,16 @@ paths:
         '404': { $ref: '#/components/responses/Error' }
   /api/v1/projects/{projectId}/sources:
     parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+    get:
+      tags: [Sources]
+      summary: 列出项目资料及解析状态
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '401': { $ref: '#/components/responses/Error' }
     post:
       tags: [Sources]
-      summary: 上传并解析项目来源
+      summary: 上传、保存并真实解析项目来源
+      description: 文本、CSV、PDF、DOCX、PPTX、XLSX 使用服务端解析器；JPG/PNG 在配置视觉模型时识别可见文字。返回来源记录、警告和事实候选。
       requestBody:
         required: true
         content:
@@ -68,6 +75,44 @@ paths:
         '201': { $ref: '#/components/responses/Success' }
         '413': { $ref: '#/components/responses/Error' }
         '415': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /api/v1/projects/{projectId}/sources/{sourceId}:
+    parameters:
+      - { $ref: '#/components/parameters/ProjectId' }
+      - { $ref: '#/components/parameters/SourceId' }
+    get:
+      tags: [Sources]
+      summary: 获取资料元信息、解析正文和警告
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    delete:
+      tags: [Sources]
+      summary: 删除原文件并使相关未确认事实和成果过期
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+  /api/v1/projects/{projectId}/sources/{sourceId}/reprocess:
+    parameters:
+      - { $ref: '#/components/parameters/ProjectId' }
+      - { $ref: '#/components/parameters/SourceId' }
+    post:
+      tags: [Sources]
+      summary: 使用当前解析 Provider 重新处理已保存原文件
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '422': { $ref: '#/components/responses/Error' }
+  /api/v1/projects/{projectId}/sources/{sourceId}/preview:
+    parameters:
+      - { $ref: '#/components/parameters/ProjectId' }
+      - { $ref: '#/components/parameters/SourceId' }
+      - name: mode
+        in: query
+        required: false
+        schema: { type: string, enum: [text] }
+    get:
+      tags: [Sources]
+      summary: 预览原文件或提取后的纯文本
+      responses:
+        '200': { description: 原文件或纯文本响应 }
   /api/v1/projects/{projectId}/facts:
     parameters: [{ $ref: '#/components/parameters/ProjectId' }]
     get:
@@ -285,6 +330,24 @@ paths:
       summary: 从历史内容创建新的恢复版本
       responses:
         '200': { $ref: '#/components/responses/Success' }
+  /api/v1/projects/{projectId}/artifacts/{artifactId}:
+    parameters:
+      - { $ref: '#/components/parameters/ProjectId' }
+      - name: artifactId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Campaigns]
+      summary: 获取成果与全部版本
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    patch:
+      tags: [Campaigns]
+      summary: 保存人工编辑为新版本
+      requestBody: { $ref: '#/components/requestBodies/JsonBody' }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
   /api/v1/webhooks/example:
     post:
       tags: [System]
@@ -308,9 +371,18 @@ components:
       type: http
       scheme: bearer
       bearerFormat: AgentToken
+    WorkbenchAccess:
+      type: apiKey
+      in: cookie
+      name: lai_workbench_access
   parameters:
     ProjectId:
       name: projectId
+      in: path
+      required: true
+      schema: { type: string }
+    SourceId:
+      name: sourceId
       in: path
       required: true
       schema: { type: string }

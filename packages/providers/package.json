@@ -1,1 +1,1 @@
-{"name":"@lai/providers","version":"0.1.0","private":true,"type":"module","exports":"./src/index.ts","dependencies":{"@lai/domain":"workspace:*","@lai/prompt-engine":"workspace:*","@lai/security":"workspace:*"}}
+{"name":"@lai/providers","version":"0.1.0","private":true,"type":"module","exports":"./src/index.ts","dependencies":{"@lai/domain":"workspace:*","@lai/prompt-engine":"workspace:*","@lai/security":"workspace:*","exceljs":"^4.4.0","jszip":"^3.10.1","mammoth":"^1.12.1","unpdf":"^1.8.1"}}

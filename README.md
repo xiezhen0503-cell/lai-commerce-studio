@@ -34,10 +34,10 @@ pnpm dev
 
 ## 第一次使用
 
-1. 打开首页“新手 AI 工作台”，选择活动方案、短视频脚本、商品主图、视频分镜或整套活动。
-2. 勾选发布平台，用一句话说清楚想做什么，然后点击“帮我生成第一版”。
+1. 打开首页“新手 AI 工作台”，可批量上传 PDF、DOCX、PPTX、XLSX、CSV、TXT、Markdown、JPG 或 PNG；系统保存原文件、解析正文并提出事实候选。
+2. 选择活动方案、短视频脚本、商品主图、视频分镜或整套活动，勾选发布平台，用一句话说清楚想做什么。
 3. 在结果旁查看 AI 使用了多少份资料、多少条已确认事实，以及还有哪些内容不能擅自补写。
-4. 需要精细控制时再进入“专业模式”；提示词工坊、任务、审核、智能体和接口能力都收在高级功能里。
+4. 进入完整项目后可预览/重新解析/删除资料、确认事实、编辑和恢复成果版本、查看主图 SVG、播放 Remotion 视频、提交并决定审核、导出 Markdown，以及测试/撤销智能体连接。
 
 首页预置虚构商品，不需要 API key 就能体验 Mock 交互。免费真实模型测试可配置 `OPENROUTER_API_KEY`，使用 `openrouter/free`；要启用 Codex，则配置 `OPENAI_API_KEY`，默认模型为 `gpt-5.6-sol`。所有密钥只放在服务端环境变量或秘密管理服务中，不得写进网页、`.env.example` 或提交到 GitHub。
 
@@ -83,8 +83,10 @@ pnpm build
 | 项目、品牌、商品、资料上传、事实/快照、PromptSpec、物料版本、任务、审核、权限与审计 | 已真实实现，本地 SQLite 持久化 | 无 |
 | Web、REST、MCP Streamable HTTP、A2A 1.0、SSE、HMAC Webhook 示例 | 已真实实现并通过运行态验证 | 无 |
 | 中文文案生成 | OpenAI Responses API 与 OpenRouter 免费路由均已实现；无 Key 时自动回退 Mock | 测试用 `OPENROUTER_API_KEY`；Codex 用 `OPENAI_API_KEY` |
-| 图片、语音、视频与文档 Provider | Mock 演示；输出可复现，不产生真实费用 | 无 API Key、无 GPU |
-| Remotion | 三个模板和浏览器 Player 预览已实现 | 本地预览不需要 GPU；服务端批量渲染需独立部署，并核验 Remotion 许可 |
+| 文档解析 | TXT/MD/CSV、PDF 文本层、DOCX、PPTX、XLSX 为服务端真实解析；图片在 OpenRouter 已配置时走视觉识别 | Office/PDF 无需 Key；图片识别使用 `OPENROUTER_API_KEY` |
+| 图片 | 五张主图 Storyboard 与确定性 SVG 构图预览会真实生成、保存、预览和版本化；不是扩散模型精修图 | 无 Key；最终商业图片需接 ComfyUI 或图片供应商 |
+| 语音 | Mock 演示并明确标识 | 真实配音需接语音 Provider |
+| Remotion 视频 | 三个模板和浏览器 Player 预览会真实执行 | 本地预览不需要 GPU；MP4 服务端批量渲染需独立部署，并核验 Remotion 许可 |
 | Anthropic / Gemini | Adapter 和配置状态已实现，默认关闭 | 需要对应 API Key |
 | Docling / RAGFlow / Dify / ComfyUI / n8n / Langfuse | Adapter 边界和配置页已实现，默认关闭 | 需要独立部署；ComfyUI 通常需要 GPU；部分产品有商业或分发限制 |
 | 真实电商平台发布 | 未实现，且不由本项目自动执行 | 下一阶段需平台授权、当期规则审核和发布前人工确认 |
@@ -118,8 +120,8 @@ MCP 客户端使用 [`docs/examples/mcp.json`](docs/examples/mcp.json)，服务�
 
 - SQLite 和同步 Worker 面向单机演示/小团队，不适合多副本高并发；扩展路径见架构文档。
 - macOS CI 分别使用 GitHub `macos-15`（Apple Silicon）与 `macos-15-intel`（Intel）验证；Playwright WebKit 不是 Apple Safari 本体，正式交付仍需在小赖的真实 Mac/Safari 上做一次点击验收。
-- Office/PDF 在 Mock 模式只读取元数据；完整正文与表格解析要配置 Docling 等服务。
-- 图片/语音/视频是 Mock 或浏览器预览，不是可直接投放的最终媒体。
+- PDF 只读取文本层；扫描件、复杂图表、PPTX 内嵌图片和高级版面需要 OpenRouter 视觉识别或 Docling/OCR 升级。
+- SVG 主图和 Remotion Player 是可操作的商业 Demo 预览，不等同于可直接投放的商品精修图或 MP4 成片；真实图片、配音和服务端 MP4 渲染仍需对应 Provider。
 - OAuth 配置展示了接入边界，尚未实现第三方身份提供商握手。
 - 平台规则和广告合规具有时效性，公开发布前仍需运营/法务使用当期规则复核。
 
