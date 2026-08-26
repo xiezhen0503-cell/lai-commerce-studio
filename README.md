@@ -110,7 +110,7 @@ MCP 客户端使用 [`docs/examples/mcp.json`](docs/examples/mcp.json)，服务�
 ## 已知限制
 
 - SQLite 和同步 Worker 面向单机演示/小团队，不适合多副本高并发；扩展路径见架构文档。
-- macOS CI 使用 GitHub `macos-14` 验证；Playwright WebKit 不是 Apple Safari 本体，正式交付仍需在小赖的真实 Mac/Safari 上做一次点击验收。
+- macOS CI 分别使用 GitHub `macos-15`（Apple Silicon）与 `macos-15-intel`（Intel）验证；Playwright WebKit 不是 Apple Safari 本体，正式交付仍需在小赖的真实 Mac/Safari 上做一次点击验收。
 - Office/PDF 在 Mock 模式只读取元数据；完整正文与表格解析要配置 Docling 等服务。
 - 图片/语音/视频是 Mock 或浏览器预览，不是可直接投放的最终媒体。
 - OAuth 配置展示了接入边界，尚未实现第三方身份提供商握手。
