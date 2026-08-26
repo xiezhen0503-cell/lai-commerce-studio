@@ -1,11 +1,19 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 
-test("首页到 Prompt Lab 的核心生产流可用", async ({ page }) => {
+test("新手工作台可以从一句话生成第一版内容", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "小赖，今天准备完成什么？" })).toBeVisible();
-  await expect(page.getByLabel("统一事实快照流程")).toContainText("事实确认");
-  await page.getByRole("link", { name: "帮我写提示词" }).click();
+  await expect(page.getByRole("heading", { name: /不用学提示词/ })).toBeVisible();
+  await expect(page.getByLabel("AI 内容生成工作台")).toContainText("本次使用的资料");
+  await page.getByRole("button", { name: /活动方案/ }).click();
+  await page.getByLabel("用一句话说说你的要求").fill("为草莓燕麦杯做一份 7 天新品上市方案，价格未确认时必须留空");
+  await page.getByRole("button", { name: "帮我生成第一版" }).click();
+  await expect(page.getByText("第一版已完成", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "新品上市方案" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "AI 这次依据了什么" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "复制结果" })).toBeVisible();
+
+  await page.getByRole("link", { name: /进入专业模式/ }).click();
   await expect(page.getByRole("heading", { name: "先选业务任务，不从空白提示词开始" })).toBeVisible();
   await page.getByPlaceholder("例如：给这款燕麦杯写一个30秒短视频脚本").fill("为草莓燕麦杯生成30秒短视频脚本，价格未确认时必须留空");
   await page.getByRole("button", { name: "生成专业提示词" }).click();

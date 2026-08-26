@@ -38,6 +38,12 @@ button { cursor: pointer; }
 .nav-link { display: flex; align-items: center; gap: 11px; min-height: 40px; padding: 0 12px; margin: 2px 0; border-radius: 10px; color: #c5c6df; font-size: 13px; transition: background .18s, color .18s, transform .18s; }
 .nav-link:hover { color: white; background: rgba(255,255,255,.08); transform: translateX(2px); }
 .nav-link svg { width: 17px; height: 17px; color: #9798bd; }
+.advanced-nav { margin-top: 20px; }
+.advanced-nav summary { padding: 10px 12px; border: 1px solid rgba(255,255,255,.1); border-radius: 10px; color: #999abd; cursor: pointer; font-size: 11px; font-weight: 800; list-style: none; }
+.advanced-nav summary::-webkit-details-marker { display: none; }
+.advanced-nav summary::after { content: "+"; float: right; color: #a9f0d2; }
+.advanced-nav[open] summary::after { content: "−"; }
+.advanced-nav nav { margin-top: 6px; }
 .sidebar-foot { margin-top: 28px; padding: 14px; border: 1px solid rgba(169,240,210,.2); border-radius: 14px; background: rgba(169,240,210,.06); }
 .sidebar-foot strong { color: #a9f0d2; font-size: 12px; }
 .sidebar-foot p { margin: 6px 0 0; color: #aeb0ca; font-size: 11px; line-height: 1.6; }
@@ -189,7 +195,9 @@ td { padding: 14px; border-top: 1px solid var(--line); font-size: 12px; vertical
 @media (max-width: 1180px) {
   .app-shell { grid-template-columns: 78px minmax(0,1fr); }
   .sidebar { padding-inline: 12px; }
-  .brand-copy, .nav-label, .nav-link span, .sidebar-foot { display: none; }
+  .brand-copy, .nav-label, .nav-link span, .sidebar-foot, .advanced-nav summary { display: none; }
+  .advanced-nav { margin-top: 8px; }
+  .advanced-nav:not([open]) nav { display: block; }
   .brand-mark { padding-inline: 7px; }
   .nav-link { justify-content: center; padding: 0; }
   .project-shell { grid-template-columns: 230px minmax(420px,1fr); }
