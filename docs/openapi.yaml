@@ -51,6 +51,27 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/Success' }
         '404': { $ref: '#/components/responses/Error' }
+  /api/v1/projects/{projectId}/reset:
+    parameters: [{ $ref: '#/components/parameters/ProjectId' }]
+    post:
+      tags: [Projects]
+      summary: 清空项目业务数据并恢复为空白资料测试项目
+      description: 删除项目内的上传资料、事实、快照历史、提示词、生成记录、成果、审核和交接数据；保留同一项目 ID 并创建一个空事实快照。原文件也会从服务端上传目录移除。
+      security: [{ WorkbenchAccess: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmation]
+              properties:
+                confirmation: { type: string, const: CLEAR_PROJECT_DATA }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
   /api/v1/projects/{projectId}/export:
     parameters: [{ $ref: '#/components/parameters/ProjectId' }]
     get:

@@ -3,7 +3,7 @@ import type { AgentHandoff, Artifact, ArtifactVersion, BrandProfile, CampaignBun
 import { AgentHandoffSchema, ArtifactTypeSchema as ArtifactTypeValidator, FactSchema, ProjectSchema, PromptSpecSchema, newId, nowIso } from "@lai/domain";
 import { getRepository, type CommerceRepository } from "@lai/database";
 import { authorize, defaultAgentPrincipal, type AgentPrincipal } from "@lai/permissions";
-import { buildPromptVariants, compilePrompt, evaluatePrompt, type CompileContext } from "@lai/prompt-engine";
+import { buildPromptVariants, compilePrompt, evaluatePrompt, retrieveSourceExcerpts, type CompileContext } from "@lai/prompt-engine";
 import { providerRegistry } from "@lai/providers";
 import { createAgentToken, hashToken, redact, signWebhook } from "@lai/security";
 import { z } from "zod";
@@ -13,6 +13,8 @@ export const DEMO_PROJECT_ID = "prj_qingmai_launch";
 export const DEMO_BRAND_ID = "brand_wuqinggu";
 export const DEMO_PRODUCT_ID = "product_qingmaicui";
 export const DEMO_AGENT_TOKEN = "lai_demo_agent_token";
+export const EMPTY_TEST_BRAND_ID = "brand_lai_test_blank";
+export const EMPTY_TEST_PRODUCT_ID = "product_lai_test_blank";
 
 export class CommerceError extends Error {
   constructor(public code: string, message: string, public status = 400, public details?: unknown) { super(message); }
@@ -124,6 +126,35 @@ export class CommerceService {
 
   saveSource(source: SourceDocument) { this.repo.saveSource(source); audit("source.uploaded", { fileName: source.fileName }, { actorId: "user_lai", actorType: "human", projectId: source.projectId, repo: this.repo }); return source; }
 
+  resetProjectForTesting(projectId: string) {
+    const current = this.getProject(projectId).project;
+    const now = nowIso();
+    const deleted = this.repo.deleteProjectData(projectId, current.workspaceId);
+    const brand: BrandProfile = {
+      id: EMPTY_TEST_BRAND_ID, workspaceId: current.workspaceId, name: "待上传品牌", positioning: "等待从你上传的资料中识别", audience: "待从资料中确认", story: "",
+      tone: ["清楚", "具体", "不夸大"], preferredWords: [], bannedWords: [], colors: [], fonts: [], allowedClaims: [], forbiddenClaims: [], ctas: [], status: "draft", updatedAt: now
+    };
+    const product: Product = {
+      id: EMPTY_TEST_PRODUCT_ID, workspaceId: current.workspaceId, brandId: brand.id, name: "待上传商品", category: "待识别", sku: "待识别", specification: "请先上传商品资料",
+      features: [], evidence: [], prohibitedClaims: [], status: "draft", updatedAt: now
+    };
+    this.repo.saveBrand(brand);
+    this.repo.saveProduct(product);
+    const project = ProjectSchema.parse({
+      ...current, name: "我的资料测试项目", type: "资料驱动内容测试", brandId: brand.id, productIds: [product.id],
+      objective: "根据我上传的资料检索事实并生成内容", businessGoal: "验证资料上传、正文检索、真实生成与文件下载的完整链路",
+      targetPlatforms: ["小红书", "抖音"], targetAudience: "待从资料中确认", budget: undefined, campaignStart: undefined, campaignEnd: undefined,
+      currentFactSnapshotId: undefined, status: "draft", updatedAt: now
+    });
+    this.repo.saveProject(project);
+    const snapshot = createFactSnapshot(projectId, "project-reset", this.repo);
+    project.currentFactSnapshotId = snapshot.id;
+    project.updatedAt = nowIso();
+    this.repo.saveProject(project);
+    audit("project.reset-for-testing", { deleted }, { actorId: "user_lai", actorType: "human", projectId, repo: this.repo });
+    return { project, snapshot, deleted };
+  }
+
   deleteSource(projectId: string, sourceId: string) {
     const source = this.repo.get<SourceDocument>("source_documents", sourceId);
     if (!source || source.projectId !== projectId) throw new CommerceError("SOURCE_NOT_FOUND", "没有找到这份项目资料", 404);
@@ -148,6 +179,7 @@ export class CommerceService {
     const text = source.extractedText || "";
     const patterns = [
       { type: "商品名称", regex: /(?:^|\n)\s*(?:商品名称|产品名称)[:：\t]\s*([^\n\t]+)/i },
+      { type: "品牌名称", regex: /(?:^|\n)\s*(?:品牌名称|品牌)[:：\t]\s*([^\n\t]+)/i },
       { type: "品类", regex: /(?:^|\n)\s*(?:品类|商品分类|产品分类)[:：\t]\s*([^\n\t]+)/i },
       { type: "SKU", regex: /(?:^|\n)\s*(?:SKU|货号)[:：\t]\s*([^\n\t]+)/i },
       { type: "规格", regex: /(?:^|\n)\s*(?:商品规格|产品规格|规格)[:：\t]\s*([^\n\t]+)/i },
@@ -183,6 +215,7 @@ export class CommerceService {
       this.repo.saveFact(fact); created.push(fact);
     }
     if (created.length) {
+      this.syncCatalogLabels(projectId, created, source.fileName);
       const snapshot = createFactSnapshot(projectId, "platform", this.repo);
       const project = this.getProject(projectId).project;
       project.currentFactSnapshotId = snapshot.id;
@@ -193,6 +226,30 @@ export class CommerceService {
     }
     audit("fact.extracted", { sourceId, count: created.length }, { actorId: "platform", actorType: "platform", projectId, repo: this.repo });
     return created;
+  }
+
+  private syncCatalogLabels(projectId: string, facts: Fact[], sourceName: string) {
+    const project = this.getProject(projectId).project;
+    const product = project.productIds[0] ? this.repo.get<Product>("products", project.productIds[0]) : undefined;
+    const brand = this.repo.get<BrandProfile>("brands", project.brandId);
+    const latest = (type: string) => facts.find((fact) => fact.type === type && fact.value)?.value;
+    if (product) {
+      const features = latest("商品卖点")?.split(/[、,，;；]/).map((item) => item.trim()).filter(Boolean);
+      const prohibitedClaims = latest("禁用宣称")?.split(/[、,，;；]/).map((item) => item.trim()).filter(Boolean);
+      this.repo.saveProduct({
+        ...product,
+        name: latest("商品名称") ?? product.name,
+        category: latest("品类") ?? product.category,
+        sku: latest("SKU") ?? product.sku,
+        specification: latest("规格") ?? product.specification,
+        features: features?.length ? features : product.features,
+        prohibitedClaims: prohibitedClaims?.length ? prohibitedClaims : product.prohibitedClaims,
+        evidence: product.evidence.includes(sourceName) ? product.evidence : [...product.evidence, sourceName],
+        updatedAt: nowIso()
+      });
+    }
+    const brandName = latest("品牌名称");
+    if (brandName && brand) this.repo.saveBrand({ ...brand, name: brandName, updatedAt: nowIso() });
   }
 
   confirmFact(projectId: string, factId: string, value?: string) {
@@ -217,8 +274,12 @@ export class CommerceService {
     const snapshot = data.snapshots.find((item) => item.id === data.project.currentFactSnapshotId) ?? data.snapshots[0] ?? createFactSnapshot(projectId, "platform", this.repo);
     const taskType = objective.includes("脚本") ? "short-video-script" : objective.includes("图片") || objective.includes("海报") ? "image-creative" : objective.includes("视频") ? "video-storyboard" : "campaign-plan";
     const now = nowIso();
-    const spec = PromptSpecSchema.parse({ id: newId("ps"), name: `${data.project.name} · ${objective.slice(0, 24)}`, version: 1, taskType, objective, businessGoal: data.project.businessGoal, projectId, brandId: brand.id, productIds: products.map((item) => item.id), targetAudience: data.project.targetAudience, targetPlatforms: data.project.targetPlatforms, contextReferences: [`laicommerce://projects/${projectId}`, `laicommerce://projects/${projectId}/facts`], sourceDocumentIds: data.sources.map((item) => item.id), factSnapshotId: snapshot.id, requiredFacts: ["商品名称", "规格", "活动价", "活动时间"], creativePreferences: ["具体场景", "一条内容只讲一个利益点", "避免模板化三段式"], tone: brand.tone, style: "清醒、具体、有生活场景", deliverables: taskType === "short-video-script" ? ["30 秒短视频脚本", "3 个 A/B 开场", "事实来源与风险提示"] : taskType === "image-creative" ? ["5 张主图 Storyboard", "图片提示词", "确定性叠字清单"] : taskType === "video-storyboard" ? ["30 秒视频分镜", "素材清单", "字幕与安全区"] : ["新品上市方案", "短视频脚本", "5 张主图 Storyboard", "视频分镜", "风险清单"], outputFormat: "使用中文 Markdown，并为每个事实型结论标注来源；最后列出待确认事项。", outputSchema: { executiveSummary: { type: "string" }, strategy: { type: "array" }, deliverables: { type: "array" }, evidence: { type: "array" }, risks: { type: "array" } }, constraints: ["不改变已确认规格", "事实变化后必须重新复核", "人工内容不可静默覆盖"], mustInclude: products.flatMap((item) => [item.name, item.specification]), mustAvoid: [...brand.bannedWords, ...products.flatMap((item) => item.prohibitedClaims)], evidencePolicy: "事实型宣称必须引用当前事实快照；缺失就是缺失。", brandPolicy: `遵循${brand.name}的品牌语气：${brand.tone.join("、")}。`, compliancePolicy: "价格、规格、日期、资质、功效和发布动作必须人工确认。", qualityRubric: ["事实准确", "来源完整", "品牌一致", "利益点清楚", "平台适配", "可执行", "无高风险宣称"], variables: { objective }, examples: [], providerHints: { temperature: "隐藏高级项，由适配器决定" }, createdBy: "user_lai", createdAt: now, updatedAt: now });
-    return { spec, snapshot, brand, products, sourceNames: data.sources.map((item) => item.fileName) };
+    const sourceExcerpts = retrieveSourceExcerpts(data.sources, objective);
+    const retrievedSourceIds = [...new Set(sourceExcerpts.map((item) => item.sourceId))];
+    const sourceNames = [...new Set(sourceExcerpts.map((item) => item.fileName))];
+    const confirmedValues = snapshot.facts.filter((fact) => ["verified", "user-confirmed"].includes(fact.status) && fact.value).map((fact) => fact.value);
+    const spec = PromptSpecSchema.parse({ id: newId("ps"), name: `${data.project.name} · ${objective.slice(0, 24)}`, version: 1, taskType, objective, businessGoal: data.project.businessGoal, projectId, brandId: brand.id, productIds: products.map((item) => item.id), targetAudience: data.project.targetAudience, targetPlatforms: data.project.targetPlatforms, contextReferences: [`laicommerce://projects/${projectId}`, `laicommerce://projects/${projectId}/facts`, ...retrievedSourceIds.map((id) => `laicommerce://sources/${id}`)], sourceDocumentIds: retrievedSourceIds, factSnapshotId: snapshot.id, requiredFacts: ["商品名称", "规格", "活动价", "活动时间"], creativePreferences: ["具体场景", "一条内容只讲一个利益点", "避免模板化三段式"], tone: brand.tone, style: "清醒、具体、有生活场景", deliverables: taskType === "short-video-script" ? ["30 秒短视频脚本", "3 个 A/B 开场", "事实来源与风险提示"] : taskType === "image-creative" ? ["5 张主图 Storyboard", "图片提示词", "确定性叠字清单"] : taskType === "video-storyboard" ? ["30 秒视频分镜", "素材清单", "字幕与安全区"] : ["新品上市方案", "短视频脚本", "5 张主图 Storyboard", "视频分镜", "风险清单"], outputFormat: "使用中文 Markdown，并为每个事实型结论标注来源；最后列出待确认事项。", outputSchema: { executiveSummary: { type: "string" }, strategy: { type: "array" }, deliverables: { type: "array" }, evidence: { type: "array" }, risks: { type: "array" } }, constraints: ["不改变已确认规格", "事实变化后必须重新复核", "人工内容不可静默覆盖"], mustInclude: confirmedValues.slice(0, 12), mustAvoid: [...brand.bannedWords, ...products.flatMap((item) => item.prohibitedClaims)], evidencePolicy: "事实型宣称必须引用当前事实快照或本次检索的资料片段；缺失就是缺失。", brandPolicy: `遵循${brand.name}的品牌语气：${brand.tone.join("、")}。`, compliancePolicy: "价格、规格、日期、资质、功效和发布动作必须人工确认。", qualityRubric: ["事实准确", "来源完整", "品牌一致", "利益点清楚", "平台适配", "可执行", "无高风险宣称"], variables: { objective, retrieval: { sourceIds: retrievedSourceIds, excerptCount: sourceExcerpts.length } }, examples: [], providerHints: { temperature: "隐藏高级项，由适配器决定" }, createdBy: "user_lai", createdAt: now, updatedAt: now });
+    return { spec, snapshot, brand, products, sourceNames, sourceExcerpts };
   }
 
   generatePrompt(projectId: string, objective: string): PromptGenerationResult {

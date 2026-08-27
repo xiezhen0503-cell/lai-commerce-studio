@@ -39,6 +39,24 @@ describe("端到端领域工作流", () => {
     service.repo.close();
   });
 
+  it("清空测试项目后只保留空白项目骨架，并可重新上传自己的资料", async () => {
+    const service = setup();
+    const prompt = service.generatePrompt(DEMO_PROJECT_ID, "生成旧项目方案");
+    await service.runPrompt(DEMO_PROJECT_ID, prompt.spec.id, "proposal");
+    const reset = service.resetProjectForTesting(DEMO_PROJECT_ID);
+    const data = service.getProject(DEMO_PROJECT_ID);
+    expect(reset.project.name).toBe("我的资料测试项目");
+    expect(data.sources).toHaveLength(0);
+    expect(data.facts).toHaveLength(0);
+    expect(data.artifacts).toHaveLength(0);
+    expect(data.jobs).toHaveLength(0);
+    expect(data.reviews).toHaveLength(0);
+    expect(data.snapshots).toHaveLength(1);
+    expect(data.snapshots[0]?.facts).toHaveLength(0);
+    expect(data.products[0]?.name).toBe("待上传商品");
+    service.repo.close();
+  });
+
   it("Campaign Bundle 生成可追踪 Job 和多类型物料", async () => {
     const service = setup();
     const bundle = await service.createCampaignBundle(DEMO_PROJECT_ID);

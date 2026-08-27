@@ -106,6 +106,15 @@ export class CommerceRepository {
     return this.db.prepare(`DELETE FROM ${safeTable(table)} WHERE id = ? AND workspace_id = ?`).run(id, workspaceId).changes > 0;
   }
 
+  deleteProjectData(projectId: string, workspaceId = "ws_demo") {
+    const projectTables = ENTITY_TABLES.filter((table) => table !== "projects" && table !== "brands" && table !== "products" && table !== "workspaces" && table !== "human_users");
+    const remove = this.db.transaction(() => Object.fromEntries(projectTables.map((table) => {
+      const changes = this.db.prepare(`DELETE FROM ${safeTable(table)} WHERE project_id = ? AND workspace_id = ?`).run(projectId, workspaceId).changes;
+      return [table, changes];
+    })));
+    return remove() as Partial<Record<EntityTable, number>>;
+  }
+
   getByTokenHash<T>(hash: string): T | undefined {
     const row = this.db.prepare("SELECT data FROM agent_service_accounts WHERE token_hash = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)").get(hash, new Date().toISOString()) as { data: string } | undefined;
     return row ? JSON.parse(row.data) as T : undefined;

@@ -21,7 +21,7 @@ export default async function HomePage() {
   const service = getCommerceService();
   const data = service.getProject(DEMO_PROJECT_ID);
   const product = data.products[0];
-  const confirmedFacts = data.facts.filter((fact) => ["verified", "user-confirmed"].includes(fact.status));
+  const confirmedFacts = data.facts.filter((fact) => ["verified", "user-confirmed", "inferred"].includes(fact.status));
   const pendingFacts = data.facts.filter((fact) => ["missing", "conflicting", "expired"].includes(fact.status));
   const ai = getTextProviderStatus();
 

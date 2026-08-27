@@ -29,6 +29,9 @@ describe("领域模型与提示词引擎", () => {
     const openai = JSON.parse(compilePrompt(context, "openai") as string) as { instructions: string; response_format: unknown };
     expect(markdown).toContain(context.snapshot.id);
     expect(markdown).toContain("缺失就是缺失");
+    expect(markdown).toContain("从上传资料正文检索到的相关片段");
+    expect(markdown).toContain("商品名称：青麦脆·草莓燕麦杯");
+    expect(context.sourceExcerpts.length).toBeGreaterThan(0);
     expect(openai.instructions).toContain(context.snapshot.id);
     expect(openai.response_format).toBeTruthy();
     expect(buildPromptVariants(context).map((item) => item.kind)).toEqual(["simple", "professional", "handoff"]);

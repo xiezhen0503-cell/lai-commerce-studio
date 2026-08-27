@@ -60,9 +60,9 @@ function providerDisplayName(provider: string, live: boolean) {
 }
 
 function providerHint(mode: InitialContext["ai"]["mode"]) {
-  if (mode === "openrouter") return "免费测试模型会自动加入商品事实、品牌语气和平台要求";
-  if (mode === "openai") return "Codex 会自动加入商品事实、品牌语气和平台要求";
-  return "演示 AI 会自动加入商品事实；配置服务端密钥后切换真实模型";
+  if (mode === "openrouter") return "免费测试模型会检索你上传的资料正文，再结合商品事实和平台要求生成";
+  if (mode === "openai") return "Codex 会检索你上传的资料正文，再结合商品事实和平台要求生成";
+  return "演示 AI 会检索已上传资料；配置服务端密钥后切换真实模型";
 }
 
 export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
@@ -72,6 +72,8 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
   const [sourceCount,setSourceCount] = useState(initial.sourceNames.length);
   const [factCount,setFactCount] = useState(initial.confirmedFacts.length);
   const [factRows,setFactRows] = useState(initial.confirmedFacts);
+  const [productName,setProductName] = useState(initial.productName);
+  const [specification,setSpecification] = useState(initial.specification);
   const [pendingNames,setPendingNames] = useState(initial.pendingFactNames);
   const [uploadSummary,setUploadSummary] = useState("");
   const [stage,setStage] = useState("");
@@ -81,7 +83,7 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
   const resultRef = useRef<HTMLElement>(null);
 
   const selectedTask = taskOptions.find((item) => item.id === taskId) ?? taskOptions[0];
-  const ready = objective.trim().length >= 8 && platforms.length > 0;
+  const ready = objective.trim().length >= 8 && platforms.length > 0 && sourceCount > 0;
 
   function chooseTask(id: (typeof taskOptions)[number]["id"]) {
     const next = taskOptions.find((item) => item.id === id) ?? taskOptions[0];
@@ -115,15 +117,17 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
     }
     setStage("");
     if (failures.length) setError(failures.join("；"));
-    setUploadSummary(`已保存并解析 ${succeeded} 份资料，新增 ${extracted} 条事实候选。可进入完整项目查看原文、警告和来源。`);
+    setUploadSummary(`已保存并解析 ${succeeded} 份资料，新增 ${extracted} 条事实候选。生成时会按你的要求检索相关正文片段。`);
     const projectResponse = await fetch(`/api/v1/projects/${initial.projectId}`);
     const projectJson = await projectResponse.json();
     if (projectResponse.ok) {
       const facts = projectJson.data.facts as Array<{type:string;value:string;status:string}>;
-      const confirmed = facts.filter((fact) => ["verified","user-confirmed"].includes(fact.status));
+      const confirmed = facts.filter((fact) => ["verified","user-confirmed","inferred"].includes(fact.status));
       setSourceCount(projectJson.data.sources.length);
       setFactCount(confirmed.length);
       setFactRows(confirmed.map((fact) => ({type:fact.type,value:fact.value})));
+      setProductName(projectJson.data.products?.[0]?.name || "待上传商品");
+      setSpecification(projectJson.data.products?.[0]?.specification || "规格待识别");
       setPendingNames(facts.filter((fact) => ["missing","conflicting","expired"].includes(fact.status)).map((fact) => fact.type));
     }
   }
@@ -181,10 +185,10 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
     <section className={styles.desk} aria-label="AI 内容生成工作台">
       <aside className={styles.factTicket}>
         <div className={styles.ticketTop}><span>本次使用的资料</span><ShieldCheck size={18}/></div>
-        <div className={styles.productBlock}><div className={styles.productIcon}><Package size={21}/></div><div><small>当前商品</small><strong>{initial.productName}</strong><span>{initial.specification}</span></div></div>
+        <div className={styles.productBlock}><div className={styles.productIcon}><Package size={21}/></div><div><small>当前商品</small><strong>{productName}</strong><span>{specification}</span></div></div>
         <div className={styles.ticketStats}>
           <div><strong>{sourceCount}</strong><span>份资料</span></div>
-          <div><strong>{factCount}</strong><span>条可用事实</span></div>
+          <div><strong>{factCount}</strong><span>条识别事实</span></div>
         </div>
         <div className={styles.factList}>
           {factRows.slice(0,4).map((fact) => <div key={`${fact.type}-${fact.value}`}><Check size={12}/><span>{fact.type}</span><strong>{fact.value}</strong></div>)}
@@ -204,7 +208,7 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
         <label className={styles.promptLabel} htmlFor="beginner-objective"><span>用一句话说说你的要求</span><small>{objective.length}/240</small></label>
         <div className={styles.promptBox}>
           <textarea id="beginner-objective" maxLength={240} value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="例如：写一条 30 秒短视频脚本，开头抓人，但不要夸大功效"/>
-          <div className={styles.promptFooter}><div><Sparkles size={13}/><span>{providerHint(initial.ai.mode)}</span></div><button type="button" onClick={generate} disabled={!ready || Boolean(stage)}>{stage?<LoaderCircle className={styles.spin} size={16}/>:<ArrowRight size={16}/>} {stage || "帮我生成第一版"}</button></div>
+          <div className={styles.promptFooter}><div><Sparkles size={13}/><span>{sourceCount > 0 ? providerHint(initial.ai.mode) : "请先上传至少一份资料，AI 才会开始生成"}</span></div><button type="button" onClick={generate} disabled={!ready || Boolean(stage)}>{stage?<LoaderCircle className={styles.spin} size={16}/>:<ArrowRight size={16}/>} {stage || (sourceCount > 0 ? "帮我生成第一版" : "先上传资料")}</button></div>
         </div>
         {error && <div className={styles.error} role="alert">{error}</div>}
         <div className={styles.safeNote}><ShieldCheck size={14}/><span>先生成草稿，不会自动发布、花钱或修改店铺。</span><Link href="/prompt-lab">进入专业模式 <ChevronRight size={12}/></Link></div>
@@ -219,6 +223,6 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
       </div>
     </section>}
 
-    <footer className={styles.footerLine}><span>{initial.projectName}</span><span>演示数据 · 可替换成你的品牌与商品</span></footer>
+    <footer className={styles.footerLine}><span>{initial.projectName}</span><span>空白测试项目 · 仅检索你上传的资料，不联网抓取网页</span></footer>
   </div>;
 }
