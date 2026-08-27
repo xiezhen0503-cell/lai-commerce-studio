@@ -77,7 +77,7 @@ paths:
     get:
       tags: [Projects]
       summary: 下载项目全部成果 ZIP
-      description: 每个成果按类型选择默认原生格式，并附带版本、事实快照、状态和项目 manifest。视频包含可编辑的 Remotion 项目包，不冒充 MP4。
+      description: 每个成果按类型选择默认原生格式，并附带版本、事实快照、状态和项目 manifest。生产模式下，视频成果包含服务端逐帧渲染的 H.264 MP4。
       security: [{ WorkbenchAccess: [] }]
       responses:
         '200': { description: ZIP 文件响应 }
@@ -355,13 +355,13 @@ paths:
     get:
       tags: [Campaigns]
       summary: 按成果类型导出当前版本
-      description: 文本成果支持 MD/DOCX/HTML/TXT/JSON；结构化成果支持 JSON/XLSX/CSV/DOCX；图片支持 SVG/JSON；视频支持 Remotion ZIP/HTML/JSON。实际可用格式由成果类型决定。
+      description: 文本成果支持 MD/DOCX/HTML/TXT/JSON；结构化成果支持 JSON/XLSX/CSV/DOCX；图片支持 PNG/SVG/JSON；视频支持 H.264 MP4、PNG 封面、SRT 字幕、Remotion ZIP、HTML 和 JSON。实际可用格式由成果类型决定。
       security: [{ WorkbenchAccess: [] }]
       parameters:
         - name: format
           in: query
           required: false
-          schema: { type: string, enum: [md, txt, html, json, csv, xlsx, docx, svg, zip] }
+          schema: { type: string, enum: [md, txt, html, json, csv, xlsx, docx, original, png, svg, mp4, srt, zip] }
       responses:
         '200': { description: 文件响应 }
         '400': { $ref: '#/components/responses/Error' }

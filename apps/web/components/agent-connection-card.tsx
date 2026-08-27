@@ -14,12 +14,12 @@ export function AgentConnectionCard({ connection }: { connection: any }) {
     setLoading("test");setMessage("");
     const response=await fetch(`/api/v1/agents/${agentId}/test`,{method:"POST"});
     const json=await response.json();setLoading("");
-    if(response.ok)setMessage(`连接正常：REST、MCP、A2A 可发现，${json.data.discovery.tools} 个工具、${json.data.discovery.prompts} 个提示词。`);
+    if(response.ok){const online=Object.entries(json.data.protocols).filter(([,available])=>available).map(([name])=>name.toUpperCase()).join("、");setMessage(`连接正常：${online} 已在线；Token、项目范围和 ${json.data.discovery.tools} 个工具定义均可读取。`);}
     else setMessage(json.error?.message||"连接测试失败");
   }
 
   async function revoke(){
-    if(!window.confirm(`撤销“${connection.name}”？它的 REST、MCP 和 A2A Token 会立即失效。`))return;
+    if(!window.confirm(`撤销“${connection.name}”？它的接口 Token 会立即失效。`))return;
     setLoading("revoke");
     const response=await fetch(`/api/v1/agents/${agentId}/revoke`,{method:"POST"});
     const json=await response.json();setLoading("");

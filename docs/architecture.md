@@ -12,8 +12,9 @@ flowchart TB
   SVC --> PERM["Permissions + Security"]
   SVC --> PROV["Provider Registry"]
   SVC --> DB["SQLite Repository"]
-  PROV --> MOCK["Mock Text/Image/Video/Document"]
-  PROV -.显式配置.-> EXT["External Providers"]
+  PROV --> DEV["Local parsers / test-only Mock"]
+  PROV --> EXT["OpenRouter / OpenAI / Pollinations"]
+  SVC --> RENDER["Remotion server renderer"]
 ```
 
 ## 依赖边界

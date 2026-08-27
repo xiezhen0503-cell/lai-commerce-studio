@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
+import sharp from "sharp";
 import type { AgentHandoff, Artifact, ArtifactVersion, BrandProfile, CampaignBundleResult, Fact, FactSnapshot, GenerationJob, Product, Project, PromptGenerationResult, PromptSpec, Scope, SourceDocument } from "@lai/domain";
 import { AgentHandoffSchema, ArtifactTypeSchema as ArtifactTypeValidator, FactSchema, ProjectSchema, PromptSpecSchema, newId, nowIso } from "@lai/domain";
 import { getRepository, type CommerceRepository } from "@lai/database";
@@ -55,6 +56,55 @@ VISUAL DIRECTION
 
 Return the image only.`;
   return { prompt, confirmedFacts };
+}
+
+function escapeSvgText(value: string) {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+}
+
+function confirmedFactValue(context: CompileContext, names: string[]) {
+  return context.snapshot.facts.find((fact) => names.includes(fact.type) && ["verified", "user-confirmed"].includes(fact.status) && fact.value)?.value;
+}
+
+async function composeUsableProductImage(assetUri: string, context: CompileContext) {
+  const match = assetUri.match(/^data:(image\/(?:png|jpe?g|webp|svg\+xml));base64,(.+)$/i);
+  if (!match?.[2]) throw new Error("图片模型返回的文件无法进入确定性排版，请重新生成。");
+  const product = context.products[0]!;
+  const productName = confirmedFactValue(context, ["商品名称", "产品名称"]) || product.name;
+  const specification = confirmedFactValue(context, ["规格", "净含量"]) || product.specification;
+  const price = confirmedFactValue(context, ["活动价", "售价", "价格"]);
+  const date = confirmedFactValue(context, ["活动时间", "活动日期"]);
+  const brandName = context.brand.name;
+  const safeColor = /^#[0-9a-f]{6}$/i.test(context.brand.colors[0] || "") ? context.brand.colors[0]! : "#242064";
+  const accent = /^#[0-9a-f]{6}$/i.test(context.brand.colors[1] || "") ? context.brand.colors[1]! : "#a9f0d2";
+  const detailLines = [specification && `规格：${specification}`, price && `活动价：${price}`, date && `活动时间：${date}`].filter(Boolean) as string[];
+  const lineMarkup = detailLines.slice(0, 3).map((line, index) => `<text x="70" y="${790 + index * 46}" fill="#ffffff" font-size="28" font-weight="600">${escapeSvgText(line)}</text>`).join("");
+  const overlay = Buffer.from(`<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+    <defs><linearGradient id="fade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${safeColor}" stop-opacity="0"/><stop offset="0.38" stop-color="${safeColor}" stop-opacity="0.86"/><stop offset="1" stop-color="${safeColor}" stop-opacity="0.98"/></linearGradient></defs>
+    <rect x="0" y="610" width="1024" height="414" fill="url(#fade)"/>
+    <rect x="70" y="695" width="160" height="42" rx="21" fill="${accent}"/><text x="150" y="724" text-anchor="middle" fill="${safeColor}" font-size="22" font-weight="700">${escapeSvgText(brandName)}</text>
+    <text x="70" y="776" fill="#ffffff" font-size="44" font-weight="800">${escapeSvgText(productName.slice(0, 20))}</text>
+    ${lineMarkup}
+    <text x="70" y="966" fill="#ffffff" font-size="24" font-weight="650">${escapeSvgText(context.brand.ctas[0] || "查看商品详情")}</text>
+    <rect x="52" y="52" width="920" height="920" rx="30" fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="2" stroke-dasharray="12 10"/>
+  </svg>`);
+  const bytes = await sharp(Buffer.from(match[2], "base64")).resize(1024, 1024, { fit: "cover" }).composite([{ input: overlay, top: 0, left: 0 }]).png({ quality: 92, compressionLevel: 8 }).toBuffer();
+  return {
+    assetUri: `data:image/png;base64,${bytes.toString("base64")}`,
+    overlayFields: { brandName, productName, specification, price, date, cta: context.brand.ctas[0] || "查看商品详情" }
+  };
+}
+
+function firstMeaningfulLine(markdown: string, fallback: string) {
+  return markdown.split(/\r?\n/).map((line) => line.replace(/^#+\s*/, "").replace(/^[-*]\s*/, "").trim()).find((line) => line.length >= 4)?.slice(0, 32) || fallback;
+}
+
+function latestGeneratedImageUri(data: ReturnType<CommerceService["getProject"]>) {
+  const artifact = data.artifacts.find((item) => item.type === "image");
+  if (!artifact) return undefined;
+  const version = data.artifactVersions.find((item) => item.artifactId === artifact.id && item.version === artifact.currentVersion);
+  if (!version) return undefined;
+  try { const parsed = JSON.parse(version.content) as { assetUri?: unknown }; return typeof parsed.assetUri === "string" ? parsed.assetUri : undefined; } catch { return undefined; }
 }
 
 const PROJECT_TEMPLATE = {
@@ -127,6 +177,10 @@ export class CommerceService {
     if (seedMode === "blank" && project && !project.productIds.includes(EMPTY_TEST_PRODUCT_ID)) {
       this.resetProjectForTesting(DEMO_PROJECT_ID);
     }
+    if (seedMode === "blank") {
+      repo.delete("agent_connections", "conn_demo");
+      repo.delete("agent_service_accounts", "agent_demo");
+    }
   }
 
   dashboard() {
@@ -147,15 +201,27 @@ export class CommerceService {
     return { project, brand: this.repo.get<BrandProfile>("brands", project.brandId), products: project.productIds.map((id) => this.repo.get<Product>("products", id)).filter(Boolean), sources: this.repo.listSources(projectId), facts: this.repo.listFacts(projectId), snapshots: this.repo.listSnapshots(projectId), artifacts, artifactVersions: artifacts.flatMap((artifact) => this.repo.listArtifactVersions(artifact.id)), jobs: this.repo.list<GenerationJob>("generation_jobs", { projectId }), reviews: this.repo.list<any>("review_requests", { projectId }) };
   }
 
-  createProject(input: Partial<Project>) {
+  createProject(input: Partial<Project> & { brandName?: string; productName?: string }) {
     const now = nowIso();
-    const project = ProjectSchema.parse({ id: newId("prj"), workspaceId: DEMO_WORKSPACE_ID, name: input.name || "未命名电商项目", type: input.type || PROJECT_TEMPLATE.type, brandId: input.brandId || DEMO_BRAND_ID, productIds: input.productIds?.length ? input.productIds : [DEMO_PRODUCT_ID], objective: input.objective || PROJECT_TEMPLATE.objective, businessGoal: input.businessGoal || PROJECT_TEMPLATE.businessGoal, targetPlatforms: input.targetPlatforms?.length ? input.targetPlatforms : PROJECT_TEMPLATE.targetPlatforms, targetAudience: input.targetAudience || PROJECT_TEMPLATE.targetAudience, budget: input.budget, campaignStart: input.campaignStart, campaignEnd: input.campaignEnd, status: "draft", createdAt: now, updatedAt: now });
+    const projectId = newId("prj");
+    const existingBrand = input.brandId ? this.repo.get<BrandProfile>("brands", input.brandId) : undefined;
+    const existingProducts = (input.productIds ?? []).map((id) => this.repo.get<Product>("products", id)).filter((item): item is Product => Boolean(item));
+    let brandId = existingBrand?.id;
+    let productIds = existingProducts.map((item) => item.id);
+    if (!brandId || !productIds.length) {
+      brandId = newId("brand");
+      const productId = newId("product");
+      const brand: BrandProfile = { id: brandId, workspaceId: DEMO_WORKSPACE_ID, name: input.brandName?.trim() || "待从资料识别品牌", positioning: "等待从本项目上传资料中识别", audience: input.targetAudience || "待从资料中确认", story: "", tone: ["清楚", "具体", "不夸大"], preferredWords: [], bannedWords: [], colors: ["#242064", "#a9f0d2"], fonts: [], allowedClaims: [], forbiddenClaims: [], ctas: ["查看商品详情"], status: "draft", updatedAt: now };
+      const product: Product = { id: productId, workspaceId: DEMO_WORKSPACE_ID, brandId, name: input.productName?.trim() || "待从资料识别商品", category: "待识别", sku: "待识别", specification: "待从上传资料识别", features: [], evidence: [], prohibitedClaims: [], status: "draft", updatedAt: now };
+      this.repo.saveBrand(brand); this.repo.saveProduct(product); productIds = [productId];
+    }
+    const project = ProjectSchema.parse({ id: projectId, workspaceId: DEMO_WORKSPACE_ID, name: input.name || "未命名电商项目", type: input.type || PROJECT_TEMPLATE.type, brandId, productIds, objective: input.objective || PROJECT_TEMPLATE.objective, businessGoal: input.businessGoal || PROJECT_TEMPLATE.businessGoal, targetPlatforms: input.targetPlatforms?.length ? input.targetPlatforms : PROJECT_TEMPLATE.targetPlatforms, targetAudience: input.targetAudience || "待从资料中确认", budget: input.budget, campaignStart: input.campaignStart, campaignEnd: input.campaignEnd, status: "draft", createdAt: now, updatedAt: now });
     this.repo.saveProject(project);
     const product = this.repo.get<Product>("products", project.productIds[0]!);
     if (product) {
       [
-        { type: "商品名称", value: product.name, status: "verified" as const, quote: "来自已确认商品资料" },
-        { type: "规格", value: product.specification, status: "user-confirmed" as const, quote: "来自已确认商品资料" },
+        { type: "商品名称", value: product.status === "confirmed" ? product.name : "", status: product.status === "confirmed" ? "verified" as const : "missing" as const, quote: product.status === "confirmed" ? "来自已确认商品资料" : undefined },
+        { type: "规格", value: product.status === "confirmed" ? product.specification : "", status: product.status === "confirmed" ? "user-confirmed" as const : "missing" as const, quote: product.status === "confirmed" ? "来自已确认商品资料" : undefined },
         { type: "活动价", value: "", status: "missing" as const, quote: undefined }
       ].forEach((item) => this.repo.saveFact(FactSchema.parse({ id: newId("fact"), projectId: project.id, type: item.type, value: item.value, status: item.status, confidence: item.status === "missing" ? 0 : 1, sourceQuote: item.quote, confirmedByUser: item.status === "user-confirmed", confirmedAt: item.status === "user-confirmed" ? now : undefined, createdAt: now, updatedAt: now })));
     }
@@ -342,19 +408,89 @@ export class CommerceService {
     if (!spec || spec.projectId !== projectId) throw new CommerceError("PROMPT_NOT_FOUND", "没有找到这个项目的提示词", 404);
     const context = this.makeCompileContext(projectId, spec.objective); context.spec = spec;
     if (artifactType === "image") return this.runImagePrompt(projectId, promptSpecId, context);
+    const structured = ["storyboard", "video-storyboard", "schedule", "handoff"].includes(artifactType);
+    const taskLabel = this.titleForArtifact(artifactType);
+    const modelSpec = PromptSpecSchema.parse({
+      ...spec,
+      objective: `${spec.objective}\n\n本次只生成：${taskLabel}。不要输出其他交付物。`,
+      deliverables: [taskLabel],
+      outputFormat: structured ? "只返回严格 JSON，不要 Markdown 代码围栏；数组中每一项必须字段完整，可直接导出为表格。" : "使用中文 Markdown，直接给可使用的完整成果，并标注事实来源与待确认项。"
+    });
+    context.spec = modelSpec;
     const prompt = compilePrompt(context, "markdown");
     const started = Date.now();
     const textProvider = providerRegistry.text;
-    const generated = await textProvider.generate(spec, prompt);
+    const generated = await textProvider.generate(modelSpec, prompt);
     const content = generated.model === "mock-text-v1" && artifactType === "script"
       ? this.mockScript(context)
       : generated.model === "mock-text-v1" && (artifactType === "storyboard" || artifactType === "video-storyboard")
         ? JSON.stringify(this.mockStoryboard(context, artifactType === "video-storyboard"), null, 2)
-        : generated.text;
+        : artifactType === "video"
+          ? this.buildVideoContent(context, generated.text, latestGeneratedImageUri(this.getProject(projectId)))
+          : structured
+            ? this.requireUsableJson(generated.text, taskLabel)
+            : generated.text;
     const artifact = this.createArtifact(projectId, artifactType, this.titleForArtifact(artifactType), content, context.snapshot.id, promptSpecId, { type: "platform-ai", id: generated.model });
     const run = { id: newId("run"), promptVersionId: promptSpecId, provider: textProvider.name, model: generated.model, inputSnapshot: context.snapshot.id, factSnapshotId: context.snapshot.id, output: content, latency: Date.now() - started, tokenUsage: generated.tokenUsage, estimatedCost: 0, qualityScore: evaluatePrompt(spec, context.snapshot).total, errors: [], createdAt: nowIso(), updatedAt: nowIso() };
     this.repo.save("prompt_runs", run, { workspaceId: DEMO_WORKSPACE_ID, projectId, parentId: promptSpecId });
     return { artifact, run };
+  }
+
+  requireUsableJson(text: string, label: string) {
+    const withoutFence = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+    const start = withoutFence.indexOf(withoutFence.includes("[") && (!withoutFence.includes("{") || withoutFence.indexOf("[") < withoutFence.indexOf("{")) ? "[" : "{");
+    const end = Math.max(withoutFence.lastIndexOf("]"), withoutFence.lastIndexOf("}"));
+    const candidate = start >= 0 && end > start ? withoutFence.slice(start, end + 1) : withoutFence;
+    try {
+      const parsed = JSON.parse(candidate);
+      if ((Array.isArray(parsed) && parsed.length > 0) || (parsed && typeof parsed === "object" && Object.keys(parsed).length > 0)) return JSON.stringify(parsed, null, 2);
+    } catch { /* reported below */ }
+    throw new CommerceError("MODEL_OUTPUT_INVALID", `${label}没有返回可下载的结构化 JSON，请重新生成。系统没有用固定模板替代真实结果。`, 502);
+  }
+
+  buildVideoContent(context: CompileContext, generatedScript: string, imageUri?: string) {
+    const product = context.products[0]!;
+    const confirmed = (names: string[]) => confirmedFactValue(context, names);
+    const specification = confirmed(["规格", "净含量"]) || product.specification;
+    const productName = confirmed(["商品名称", "产品名称"]) || product.name;
+    const price = confirmed(["活动价", "售价", "价格"]);
+    const isFifteenSeconds = !/30\s*秒/.test(context.spec.objective);
+    const duration = isFifteenSeconds ? 15 : 30;
+    const headline = firstMeaningfulLine(generatedScript, context.spec.objective).slice(0, 28);
+    const subheadline = specification && !/待|请先/.test(specification) ? `${productName} · ${specification}` : `${productName} · 具体信息以项目确认事实为准`;
+    const cta = context.brand.ctas[0] || "查看商品详情";
+    const captions = isFifteenSeconds ? [
+      { start: 0, end: 4.5, text: headline },
+      { start: 4.5, end: 10, text: subheadline },
+      { start: 10, end: 15, text: cta }
+    ] : [
+      { start: 0, end: 8, text: headline },
+      { start: 8, end: 20, text: subheadline },
+      { start: 20, end: 30, text: cta }
+    ];
+    return JSON.stringify({
+      schema: "laicommerce.video-render/v1",
+      template: isFifteenSeconds ? "SellingPoint15" : "Promo30",
+      props: {
+        brandName: context.brand.name,
+        product: productName,
+        specification,
+        ...(price ? { price: `活动价：${price}` } : {}),
+        cta,
+        headline,
+        subheadline,
+        brandColor: /^#[0-9a-f]{6}$/i.test(context.brand.colors[0] || "") ? context.brand.colors[0] : "#242064",
+        accentColor: /^#[0-9a-f]{6}$/i.test(context.brand.colors[1] || "") ? context.brand.colors[1] : "#a9f0d2",
+        factSnapshotId: context.snapshot.id,
+        ...(imageUri ? { imageUri } : {})
+      },
+      captions,
+      sourceScript: generatedScript,
+      sourceDocumentIds: context.spec.sourceDocumentIds,
+      factSnapshotId: context.snapshot.id,
+      durationSeconds: duration,
+      outputs: ["mp4", "png", "srt", "zip", "json"]
+    }, null, 2);
   }
 
   async runImagePrompt(projectId: string, promptSpecId: string, context: CompileContext) {
@@ -377,11 +513,15 @@ export class CommerceService {
     } catch (error) {
       throw new CommerceError("IMAGE_GENERATION_FAILED", error instanceof Error ? error.message : "图片没有生成成功，请稍后重试。", 503);
     }
+    const composed = await composeUsableProductImage(generated.assetUri, context).catch((error) => {
+      throw new CommerceError("IMAGE_COMPOSITION_FAILED", error instanceof Error ? error.message : "商品图中文信息层合成失败，请稍后重试。", 503);
+    });
     const generationMetadata = generated.metadata as Record<string, unknown>;
     const model = typeof generationMetadata.model === "string" ? generationMetadata.model : providerRegistry.image.name;
     const content = JSON.stringify({
-      assetUri: generated.assetUri,
-      metadata: generated.metadata,
+      assetUri: composed.assetUri,
+      rawAssetUri: generated.assetUri,
+      metadata: { ...generated.metadata, deterministicOverlay: true, outputMimeType: "image/png", overlayFields: composed.overlayFields },
       production: {
         prompt: production.prompt,
         userObjective: context.spec.objective,
@@ -391,8 +531,8 @@ export class CommerceService {
         factSnapshotId: context.snapshot.id,
         referenceSourceId: referenceImages.length ? imageSource?.id : undefined,
         warnings: referenceImages.length
-          ? ["已使用本项目上传的商品照片作为视觉参考；生成结果仍需人工对照包装与文字。", "价格、规格、活动和功效文字未交给图片模型渲染。"]
-          : ["没有找到可用的商品照片，本次是通用包装创意草稿，商品外观可能与实物不一致。", "价格、规格、活动和功效文字未交给图片模型渲染。"]
+          ? ["已使用本项目上传的商品照片作为视觉参考；生成结果仍需人工对照包装。", "价格、规格、活动时间与 CTA 已由程序从确认事实中排版，不依赖图片模型拼写中文。"]
+          : ["没有找到可用的商品照片，本次是通用包装创意草稿，商品外观可能与实物不一致。", "价格、规格、活动时间与 CTA 已由程序从确认事实中排版，不依赖图片模型拼写中文。"]
       }
     });
     const artifact = this.createArtifact(projectId, "image", "AI 商品主图", content, context.snapshot.id, promptSpecId, { type: "platform-ai", id: providerRegistry.image.name });
@@ -407,7 +547,7 @@ export class CommerceService {
     return { artifact, run };
   }
 
-  titleForArtifact(type: z.infer<typeof ArtifactTypeValidator>) { return ({ proposal: "新品上市方案", script: "30秒短视频脚本", storyboard: "五张主图 Storyboard", "image-prompt": "图片生成提示词", image: "AI 商品主图", "video-storyboard": "30秒视频分镜", video: "Remotion 视频草稿", caption: "平台文案", schedule: "内容排期", report: "质量报告", prompt: "专业提示词", handoff: "智能体交接包" } as Record<string, string>)[type] || type; }
+  titleForArtifact(type: z.infer<typeof ArtifactTypeValidator>) { return ({ proposal: "新品上市方案", script: "30秒短视频脚本", storyboard: "五张主图 Storyboard", "image-prompt": "图片生成提示词", image: "AI 商品主图", "video-storyboard": "30秒视频分镜", video: "可下载 MP4 商品视频", caption: "平台文案", schedule: "内容排期", report: "质量报告", prompt: "专业提示词", handoff: "智能体交接包" } as Record<string, string>)[type] || type; }
 
   mockScript(context: CompileContext) {
     const product = context.products[0]!;
@@ -471,26 +611,70 @@ export class CommerceService {
     const context = this.makeCompileContext(projectId, objective);
     const job: GenerationJob = { id: newId("job"), workspaceId: DEMO_WORKSPACE_ID, projectId, type: "campaign-bundle", status: "running", progress: 15, stage: "建立事实快照与任务简报", resultArtifactIds: [], createdAt: nowIso(), updatedAt: nowIso() };
     this.repo.saveJob(job);
-    const prompt = this.generatePrompt(projectId, objective);
-    const textProvider = providerRegistry.text;
-    const generated = await textProvider.generate(prompt.spec, compilePrompt(context));
-    const storyboard = this.mockStoryboard(context) as Array<{ index: number; headline: string; composition: string; overlay: string }>;
-    const visualPreviews = await Promise.all(storyboard.map(async (frame) => ({ frame, image: await providerRegistry.image.generate({ prompt: `${frame.headline}｜${frame.composition}`, width: 1080, height: 1080 }) })));
-    const items: Array<{ type: z.infer<typeof ArtifactTypeValidator>; content: string; title?: string }> = [
-      { type: "proposal", content: generated.text }, { type: "script", content: this.mockScript(context) }, { type: "storyboard", content: JSON.stringify(storyboard, null, 2) },
-      { type: "image-prompt", content: `保持真实商品包装不变。场景：晨间通勤桌面；光线：柔和侧光；品牌色：${context.brand.colors.join("、")}；价格、规格、Logo、CTA 不进入生成画面，交由程序化图层叠加。` },
-      { type: "video-storyboard", content: JSON.stringify(this.mockStoryboard(context, true), null, 2) }, { type: "video", content: JSON.stringify({ template: "Promo30", props: { product: context.products[0]?.name, specification: context.products[0]?.specification, factSnapshotId: context.snapshot.id } }, null, 2) },
-      { type: "schedule", content: "第1–2天：素材与开场稿；第3–5天：小流量测试；第6–7天：复盘；第8–14天：胜出内容扩量。" }, { type: "report", content: `事实快照：${context.snapshot.id}\n阻断项：${prompt.evaluation.blockers.join("、") || "无"}\n人工审核：必需` },
-      ...visualPreviews.map(({ frame, image }) => ({ type: "image" as const, title: `主图预览 ${frame.index}｜${frame.headline}`, content: JSON.stringify({ assetUri: image.assetUri, metadata: image.metadata, storyboard: frame, factSnapshotId: context.snapshot.id }) }))
-    ];
-    const artifacts = items.map((item) => {
-      const creatorId = item.type === "proposal" ? generated.model : item.type === "image" ? providerRegistry.image.name : item.type === "video" ? "remotion-template-v1" : "deterministic-campaign-engine-v1";
-      return this.createArtifact(projectId, item.type, item.title || this.titleForArtifact(item.type), item.content, context.snapshot.id, prompt.spec.id, { type: "platform-ai", id: creatorId });
-    });
-    job.status = prompt.evaluation.blockers.length ? "needs-review" : "succeeded"; job.progress = 100; job.stage = prompt.evaluation.blockers.length ? "等待人工确认高风险字段" : "已完成"; job.resultArtifactIds = artifacts.map((item) => item.id); job.updatedAt = nowIso(); this.repo.saveJob(job);
-    const bundle = { id: newId("bundle"), projectId, factSnapshotId: context.snapshot.id, jobId: job.id, artifactIds: job.resultArtifactIds, provider: textProvider.name, model: generated.model, createdAt: nowIso(), updatedAt: nowIso() };
-    this.repo.save("campaign_bundles", bundle, { workspaceId: DEMO_WORKSPACE_ID, projectId, status: job.status });
-    return bundle;
+    try {
+      const prompt = this.generatePrompt(projectId, objective);
+      context.spec = prompt.spec;
+      const textProvider = providerRegistry.text;
+      job.progress = 28; job.stage = "真实模型生成整套文字与结构化内容"; job.updatedAt = nowIso(); this.repo.saveJob(job);
+      const bundleInstruction = `${compilePrompt(context)}\n\n你现在要一次完成整套电商内容生产。只返回一个严格 JSON 对象，不要 Markdown 代码围栏，不要省略字段。字段必须是：\n- proposal: 完整可执行方案 Markdown\n- script: 15秒短视频完整脚本 Markdown，含时间、画面、动作、口播、屏幕文字、证据\n- storyboard: 5项数组，每项含 index、role、headline、composition、overlay、evidence\n- imagePrompt: 可直接交给图片模型的完整中文/英文提示词 Markdown\n- videoStoryboard: 4到8项数组，每项含 start、end、shot、action、voice、overlay、evidence\n- caption: 目标平台可直接编辑使用的正文 Markdown\n- schedule: 7到14项数组，每项含 day、channel、content、metric、stopRule\n- report: 质量与合规报告 Markdown，逐项列证据、缺失和人工确认点\n所有事实只能使用事实快照；缺失字段写“待确认”，不要编造。`;
+      const generated = await textProvider.generate(prompt.spec, bundleInstruction);
+      let campaign: { proposal: string; script: string; storyboard: unknown[]; imagePrompt: string; videoStoryboard: unknown[]; caption: string; schedule: unknown[]; report: string };
+      if (generated.model === "mock-text-v1") {
+        campaign = {
+          proposal: generated.text,
+          script: this.mockScript(context),
+          storyboard: this.mockStoryboard(context) as unknown[],
+          imagePrompt: `商品摄影构图预览：${context.spec.objective}`,
+          videoStoryboard: this.mockStoryboard(context, true) as unknown[],
+          caption: generated.text,
+          schedule: [{ day: 1, channel: context.spec.targetPlatforms[0] || "待确认", content: "演示流程", metric: "待确认", stopRule: "待确认" }],
+          report: `事实快照：${context.snapshot.id}\n本地 Mock 仅用于开发测试，不得部署为真实产出。`
+        };
+      } else {
+        const parsed = JSON.parse(this.requireUsableJson(generated.text, "整套活动"));
+        const schema = z.object({
+          proposal: z.string().min(80), script: z.string().min(80), storyboard: z.array(z.record(z.string(), z.unknown())).min(3),
+          imagePrompt: z.string().min(30), videoStoryboard: z.array(z.record(z.string(), z.unknown())).min(3), caption: z.string().min(30),
+          schedule: z.array(z.record(z.string(), z.unknown())).min(3), report: z.string().min(40)
+        });
+        const checked = schema.safeParse(parsed);
+        if (!checked.success) throw new CommerceError("CAMPAIGN_OUTPUT_INCOMPLETE", "真实模型返回的整套内容缺少必需成果，系统没有用固定模板补齐；请重新生成。", 502, checked.error.flatten());
+        campaign = checked.data;
+      }
+
+      job.progress = 62; job.stage = "真实图片模型生成商品图并叠加确认信息"; job.updatedAt = nowIso(); this.repo.saveJob(job);
+      let imageArtifact: ReturnType<CommerceService["createArtifact"]>;
+      if (generated.model === "mock-text-v1") {
+        const visual = await providerRegistry.image.generate({ prompt: campaign.imagePrompt, width: 1024, height: 1024 });
+        imageArtifact = this.createArtifact(projectId, "image", "本地构图预览", JSON.stringify({ assetUri: visual.assetUri, metadata: visual.metadata, factSnapshotId: context.snapshot.id }), context.snapshot.id, prompt.spec.id, { type: "platform-ai", id: providerRegistry.image.name });
+      } else {
+        imageArtifact = (await this.runImagePrompt(projectId, prompt.spec.id, context)).artifact;
+      }
+      let imageUri: string | undefined;
+      try { imageUri = JSON.parse(imageArtifact.version.content).assetUri as string | undefined; } catch { imageUri = undefined; }
+
+      job.progress = 78; job.stage = "建立真实 MP4 渲染配置与可下载成果"; job.updatedAt = nowIso(); this.repo.saveJob(job);
+      const items: Array<{ type: z.infer<typeof ArtifactTypeValidator>; content: string }> = [
+        { type: "proposal", content: campaign.proposal },
+        { type: "script", content: campaign.script },
+        { type: "storyboard", content: JSON.stringify(campaign.storyboard, null, 2) },
+        { type: "image-prompt", content: campaign.imagePrompt },
+        { type: "video-storyboard", content: JSON.stringify(campaign.videoStoryboard, null, 2) },
+        { type: "video", content: this.buildVideoContent(context, campaign.script, imageUri) },
+        { type: "caption", content: campaign.caption },
+        { type: "schedule", content: JSON.stringify(campaign.schedule, null, 2) },
+        { type: "report", content: campaign.report }
+      ];
+      const artifacts = items.map((item) => this.createArtifact(projectId, item.type, this.titleForArtifact(item.type), item.content, context.snapshot.id, prompt.spec.id, { type: "platform-ai", id: item.type === "video" ? `remotion-real-mp4-v1+${generated.model}` : generated.model }));
+      artifacts.push(imageArtifact);
+      job.status = prompt.evaluation.blockers.length ? "needs-review" : "succeeded"; job.progress = 100; job.stage = prompt.evaluation.blockers.length ? "成果已生成，等待人工确认高风险字段" : "真实成果已全部生成"; job.resultArtifactIds = artifacts.map((item) => item.id); job.updatedAt = nowIso(); this.repo.saveJob(job);
+      const bundle = { id: newId("bundle"), projectId, factSnapshotId: context.snapshot.id, jobId: job.id, artifactIds: job.resultArtifactIds, provider: textProvider.name, model: generated.model, createdAt: nowIso(), updatedAt: nowIso() };
+      this.repo.save("campaign_bundles", bundle, { workspaceId: DEMO_WORKSPACE_ID, projectId, status: job.status });
+      return bundle;
+    } catch (error) {
+      job.status = "failed"; job.progress = 100; job.stage = "真实产出失败，未使用 Mock 替代"; job.error = error instanceof Error ? error.message : "未知生成错误"; job.updatedAt = nowIso(); this.repo.saveJob(job);
+      throw error;
+    }
   }
 
   requestReview(projectId: string, artifactId: string, requestedBy = "user_lai") {
@@ -516,9 +700,13 @@ export class CommerceService {
   }
 
   createAgentConnection(input: { name: string; projectIds?: string[]; scopes?: Scope[]; expiresAt?: string }) {
-    const token = createAgentToken(); const now = nowIso(); const account = { id: newId("agent"), workspaceId: DEMO_WORKSPACE_ID, name: input.name, scopes: input.scopes ?? defaultAgentPrincipal("temp").scopes, projectIds: input.projectIds?.length ? input.projectIds : [DEMO_PROJECT_ID], tokenLast4: token.slice(-4), status: "active", expiresAt: input.expiresAt, createdAt: now, updatedAt: now };
+    const projectIds = input.projectIds?.length ? input.projectIds : this.listProjects().slice(0, 1).map((project) => project.id);
+    if (!input.name?.trim()) throw new CommerceError("INVALID_AGENT_NAME", "请填写智能体名称", 400);
+    if (!projectIds.length || projectIds.some((projectId) => !this.repo.get<Project>("projects", projectId))) throw new CommerceError("INVALID_AGENT_PROJECT", "请选择一个真实存在的项目", 400);
+    const token = createAgentToken(); const now = nowIso(); const account = { id: newId("agent"), workspaceId: DEMO_WORKSPACE_ID, name: input.name.trim(), scopes: input.scopes ?? defaultAgentPrincipal("temp").scopes, projectIds, tokenLast4: token.slice(-4), status: "active", expiresAt: input.expiresAt, createdAt: now, updatedAt: now };
     this.repo.save("agent_service_accounts", account, { workspaceId: DEMO_WORKSPACE_ID, status: "active", tokenHash: hashToken(token), expiresAt: input.expiresAt });
-    const connection = { id: newId("conn"), workspaceId: DEMO_WORKSPACE_ID, agentServiceAccountId: account.id, name: account.name, protocol: "MCP / REST / A2A", status: "active", createdAt: now, updatedAt: now };
+    const publiclyAvailableProtocols = ["REST", process.env.MCP_PUBLIC_URL && "MCP", process.env.A2A_PUBLIC_URL && "A2A"].filter(Boolean).join(" / ");
+    const connection = { id: newId("conn"), workspaceId: DEMO_WORKSPACE_ID, agentServiceAccountId: account.id, name: account.name, protocol: publiclyAvailableProtocols, status: "active", createdAt: now, updatedAt: now };
     this.repo.save("agent_connections", connection, { workspaceId: DEMO_WORKSPACE_ID, status: "active", parentId: account.id });
     audit("agent.connection.created", { agentId: account.id, scopes: account.scopes, projectIds: account.projectIds }, { actorId: "user_lai", actorType: "human", repo: this.repo });
     return { account, connection, token };

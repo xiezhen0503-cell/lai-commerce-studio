@@ -9,8 +9,10 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const DEFAULT_OPENAI_MODEL = "gpt-5.6-sol";
 const DEFAULT_OPENROUTER_MODEL = "openrouter/free";
+const DEFAULT_POLLINATIONS_TEXT_MODEL = "nemotron-3.5-lightning";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
+const POLLINATIONS_CHAT_URL = "https://gen.pollinations.ai/v1/chat/completions";
 const COMMERCE_INSTRUCTIONS = `你是 LaiCommerce Studio 的中文电商内容助手。
 
 工作要求：
@@ -21,7 +23,7 @@ const COMMERCE_INSTRUCTIONS = `你是 LaiCommerce Studio 的中文电商内容�
 - 只生成草稿，不声称已经发布、投放、扣费或修改店铺。`;
 
 type OpenAIReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
-type TextProviderMode = "auto" | "openai" | "openrouter" | "mock";
+type TextProviderMode = "auto" | "openai" | "openrouter" | "pollinations" | "mock";
 type ActiveTextProvider = Exclude<TextProviderMode, "auto">;
 type ImageProviderMode = "auto" | "pollinations" | "deterministic";
 
@@ -138,7 +140,7 @@ async function analyzeImageWithOpenRouter(input: { fileName: string; mimeType: s
 
 function textProviderMode(): TextProviderMode {
   const value = process.env.LAI_TEXT_PROVIDER?.trim().toLowerCase();
-  return value === "openai" || value === "openrouter" || value === "mock" ? value : "auto";
+  return value === "openai" || value === "openrouter" || value === "pollinations" || value === "mock" ? value : "auto";
 }
 
 function openAIModel() {
@@ -154,12 +156,20 @@ function openRouterModel() {
   return process.env.OPENROUTER_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL;
 }
 
+function pollinationsTextModel() {
+  return process.env.POLLINATIONS_TEXT_MODEL?.trim() || DEFAULT_POLLINATIONS_TEXT_MODEL;
+}
+
 function openAIConfigured() {
   return Boolean(process.env.OPENAI_API_KEY?.trim());
 }
 
 function openRouterConfigured() {
   return Boolean(process.env.OPENROUTER_API_KEY?.trim());
+}
+
+function pollinationsTextConfigured() {
+  return Boolean(process.env.POLLINATIONS_TEXT_API_KEY?.trim());
 }
 
 function imageProviderMode(): ImageProviderMode {
@@ -185,6 +195,7 @@ function activeTextProvider(): ActiveTextProvider {
   const mode = textProviderMode();
   if (mode !== "auto") return mode;
   if (openAIConfigured()) return "openai";
+  if (pollinationsTextConfigured()) return "pollinations";
   if (openRouterConfigured()) return "openrouter";
   return "mock";
 }
@@ -330,16 +341,67 @@ export class OpenRouterFreeTextProvider implements TextGenerationProvider {
   }
 }
 
+export class PollinationsQuestTextProvider implements TextGenerationProvider {
+  name = "pollinations-quest";
+  get configured() { return pollinationsTextConfigured(); }
+
+  async generate(_spec: PromptSpec, prompt: string) {
+    const apiKey = process.env.POLLINATIONS_TEXT_API_KEY?.trim();
+    if (!apiKey) throw new Error("免费测试文本模型尚未配置：请管理员设置服务端 Pollinations 文本 Key。");
+    const model = pollinationsTextModel();
+    const started = performance.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 90_000);
+    try {
+      const response = await fetch(POLLINATIONS_CHAT_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: COMMERCE_INSTRUCTIONS },
+            { role: "user", content: prompt }
+          ],
+          temperature: 0.55,
+          max_tokens: 3_500
+        }),
+        signal: controller.signal
+      });
+      const payload = await response.json().catch(() => ({})) as OpenRouterResponsePayload;
+      if (!response.ok) {
+        const detail = payload.error?.message?.trim();
+        if (response.status === 401 || response.status === 403) throw new Error("免费测试文本模型的服务端凭证无效或已过期，请管理员重新配置。");
+        if (response.status === 402) throw new Error("免费测试额度已用完，请管理员领取 Quest Pollen 或补充额度。");
+        if (response.status === 429) throw new Error("免费测试模型当前请求较多，请稍后再试。");
+        throw new Error(`免费测试文本模型调用失败（${response.status}）${detail ? `：${detail}` : "，请稍后重试"}`);
+      }
+      const text = extractOpenRouterText(payload);
+      if (!text) throw new Error("免费测试文本模型没有返回可用内容，请重新生成。");
+      return { text, model: payload.model?.trim() || model, latencyMs: Math.round(performance.now() - started), tokenUsage: payload.usage?.total_tokens ?? 0 };
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw new Error("免费测试文本模型响应超时，请稍后再试。");
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+}
+
 export class RoutedTextProvider implements TextGenerationProvider {
   private active() {
     const provider = activeTextProvider();
     if (provider === "openai") return new OpenAIResponsesTextProvider();
+    if (provider === "pollinations") return new PollinationsQuestTextProvider();
     if (provider === "openrouter") return new OpenRouterFreeTextProvider();
     return new MockTextProvider();
   }
   get name() { return this.active().name; }
   get configured() { return this.active().configured; }
-  generate(spec: PromptSpec, prompt: string) { return this.active().generate(spec, prompt); }
+  generate(spec: PromptSpec, prompt: string) {
+    const provider = this.active();
+    if (process.env.LAI_REQUIRE_LIVE_OUTPUTS === "true" && provider.name === "mock-text-v1") throw new Error("生产工作台禁止使用 Mock 文本：请配置真实文本模型后再生成。");
+    return provider.generate(spec, prompt);
+  }
 }
 
 export function getTextProviderStatus() {
@@ -357,6 +419,13 @@ export function getTextProviderStatus() {
     model: openRouterModel(),
     configured: openRouterConfigured(),
     live: openRouterConfigured()
+  };
+  if (active === "pollinations") return {
+    mode: "pollinations" as const,
+    provider: "pollinations-quest",
+    model: pollinationsTextModel(),
+    configured: pollinationsTextConfigured(),
+    live: pollinationsTextConfigured()
   };
   return {
     mode: "mock" as const,
@@ -428,23 +497,17 @@ export class DeterministicStoryboardImageProvider implements ImageGenerationProv
 
 export class PollinationsImageProvider implements ImageGenerationProvider {
   name = "pollinations-image";
-  configured = true;
+  get configured() { return Boolean(process.env.POLLINATIONS_API_KEY?.trim()); }
 
   async generate(input: { prompt: string; width: number; height: number; referenceImages?: Array<{ dataUri: string }> }) {
     const apiKey = process.env.POLLINATIONS_API_KEY?.trim();
-    const referenceImages = apiKey ? input.referenceImages ?? [] : [];
+    if (!apiKey) throw new Error("免费生图服务尚未配置：请管理员在服务端设置 Pollinations Key。");
+    const referenceImages = input.referenceImages ?? [];
     const model = referenceImages.length ? pollinationsReferenceModel() : pollinationsModel();
-    const url = new URL(`https://gen.pollinations.ai/image/${encodeURIComponent(input.prompt.slice(0, 6_000))}`);
-    url.searchParams.set("model", model);
-    url.searchParams.set("width", String(input.width));
-    url.searchParams.set("height", String(input.height));
-    url.searchParams.set("safe", "true");
-
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 120_000);
     try {
-      const response = apiKey
-        ? await fetch("https://gen.pollinations.ai/v1/images/generations", {
+      const response = await fetch("https://gen.pollinations.ai/v1/images/generations", {
             method: "POST",
             headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
             body: JSON.stringify({
@@ -454,12 +517,10 @@ export class PollinationsImageProvider implements ImageGenerationProvider {
               size: `${input.width}x${input.height}`,
               quality: "medium",
               response_format: "b64_json",
-              safe: true,
               ...(referenceImages.length ? { image: referenceImages.map((item) => item.dataUri) } : {})
             }),
             signal: controller.signal
-          })
-        : await fetch(url, { signal: controller.signal });
+          });
       if (!response.ok) {
         const detail = (await response.text().catch(() => "")).slice(0, 240).trim();
         if (response.status === 401 || response.status === 403) throw new Error("免费生图服务的测试凭证无效或已过期，请管理员重新配置。");
@@ -515,7 +576,11 @@ export class RoutedImageProvider implements ImageGenerationProvider {
   }
   get name() { return this.active().name; }
   get configured() { return this.active().configured; }
-  generate(input: { prompt: string; width: number; height: number; referenceImages?: Array<{ dataUri: string }> }) { return this.active().generate(input); }
+  generate(input: { prompt: string; width: number; height: number; referenceImages?: Array<{ dataUri: string }> }) {
+    const provider = this.active();
+    if (process.env.LAI_REQUIRE_LIVE_OUTPUTS === "true" && provider.name === "deterministic-storyboard-svg-v1") throw new Error("生产工作台禁止用 SVG 构图冒充商品图：请先配置真实图片模型。");
+    return provider.generate(input);
+  }
 }
 
 export function getImageProviderStatus() {
@@ -524,8 +589,8 @@ export function getImageProviderStatus() {
     mode: "pollinations" as const,
     provider: "pollinations-image",
     model: pollinationsModel(),
-    configured: true,
-    live: true,
+    configured: Boolean(process.env.POLLINATIONS_API_KEY?.trim()),
+    live: Boolean(process.env.POLLINATIONS_API_KEY?.trim()),
     externalGeneration: true,
     authenticated: Boolean(process.env.POLLINATIONS_API_KEY?.trim())
   };

@@ -47,7 +47,7 @@ describe("成果类型化下载", () => {
     expect(csv.bytes.toString("utf8")).toContain("﻿index,headline,overlay");
   });
 
-  test("图片下载的是 SVG 资产，视频下载的是可编辑 Remotion ZIP", async () => {
+  test("图片下载原生资产，视频同时支持 MP4 与可编辑项目包", async () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg"><text>主图预览</text></svg>';
     const image = await buildArtifactExport(input("image", JSON.stringify({ assetUri: `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}` })), "svg");
     expect(image.bytes.toString("utf8")).toContain("<svg");
@@ -58,7 +58,7 @@ describe("成果类型化下载", () => {
     const video = await buildArtifactExport(input("video", JSON.stringify({ template: "Promo30", props: { product: "燕麦杯", specification: "50克×6杯" } })), "zip");
     const archive = await JSZip.loadAsync(video.bytes);
     expect(Object.keys(archive.files)).toEqual(expect.arrayContaining(["README.md", "remotion-project.json", "preview.html"]));
-    expect(await archive.file("README.md")!.async("string")).toContain("不是 MP4 成片");
-    expect(artifactExportFormats("video")).not.toContain("mp4");
+    expect(await archive.file("README.md")!.async("string")).toContain("MP4 成片");
+    expect(artifactExportFormats("video")).toEqual(expect.arrayContaining(["mp4", "png", "srt", "zip", "json"]));
   });
 });

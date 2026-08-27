@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { authorize, defaultAgentPrincipal } from "@lai/permissions";
-import { getImageProviderStatus, getTextProviderStatus, MockImageProvider, MockTextProvider, MockVideoProvider, MockVoiceProvider, OpenAIResponsesTextProvider, OpenRouterFreeTextProvider, PollinationsImageProvider, RoutedTextProvider } from "@lai/providers";
+import { getImageProviderStatus, getTextProviderStatus, MockImageProvider, MockTextProvider, MockVideoProvider, MockVoiceProvider, OpenAIResponsesTextProvider, OpenRouterFreeTextProvider, PollinationsImageProvider, PollinationsQuestTextProvider, RoutedTextProvider } from "@lai/providers";
 import { detectPromptInjection, redact, safeWorkspacePath, signWebhook, validateOutboundUrl, validateUpload, verifyWebhook } from "@lai/security";
 import { CommerceRepository } from "@lai/database";
 import { CommerceService, DEMO_PROJECT_ID } from "@lai/shared";
@@ -56,6 +56,8 @@ describe("安全、权限和 Provider", () => {
   it("没有服务端密钥时自动保留 Mock 演示链路", async () => {
     vi.stubEnv("LAI_TEXT_PROVIDER", "auto");
     vi.stubEnv("OPENAI_API_KEY", "");
+    vi.stubEnv("OPENROUTER_API_KEY", "");
+    vi.stubEnv("POLLINATIONS_TEXT_API_KEY", "");
     const service = new CommerceService(new CommerceRepository(":memory:"));
     const spec = service.makeCompileContext(DEMO_PROJECT_ID, "生成上新方案").spec;
     const generated = await new RoutedTextProvider().generate(spec, "测试提示词");
@@ -116,6 +118,31 @@ describe("安全、权限和 Provider", () => {
     expect(body).toMatchObject({ model: "openrouter/free", messages: [{ role: "system" }, { role: "user", content: "只使用已确认事实" }] });
     expect(getTextProviderStatus()).toMatchObject({ mode: "openrouter", provider: "openrouter-free", model: "openrouter/free", live: true });
     expect(generated).toMatchObject({ text: "免费模型测试结果", model: "qwen/qwen3.6-27b:free", tokenUsage: 88 });
+    service.repo.close();
+  });
+
+  it("通过 Pollinations Quest Pollen 调用受限免费文本模型", async () => {
+    vi.stubEnv("LAI_TEXT_PROVIDER", "pollinations");
+    vi.stubEnv("POLLINATIONS_TEXT_API_KEY", "sk-test-text-only");
+    vi.stubEnv("POLLINATIONS_TEXT_MODEL", "nemotron-3.5-lightning");
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
+      model: "nemotron-3.5-lightning",
+      choices: [{ message: { content: "Quest 免费文本结果" } }],
+      usage: { total_tokens: 64 }
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const service = new CommerceService(new CommerceRepository(":memory:"));
+    const spec = service.makeCompileContext(DEMO_PROJECT_ID, "生成免费测试稿").spec;
+    const generated = await new PollinationsQuestTextProvider().generate(spec, "只引用上传资料");
+    const request = fetchMock.mock.calls[0]?.[1];
+    const body = JSON.parse(String(request?.body));
+
+    expect(fetchMock).toHaveBeenCalledWith("https://gen.pollinations.ai/v1/chat/completions", expect.objectContaining({ method: "POST" }));
+    expect(new Headers(request?.headers).get("authorization")).toBe("Bearer sk-test-text-only");
+    expect(body).toMatchObject({ model: "nemotron-3.5-lightning", messages: [{ role: "system" }, { role: "user", content: "只引用上传资料" }] });
+    expect(getTextProviderStatus()).toMatchObject({ mode: "pollinations", provider: "pollinations-quest", model: "nemotron-3.5-lightning", live: true });
+    expect(generated).toMatchObject({ text: "Quest 免费文本结果", tokenUsage: 64 });
     service.repo.close();
   });
 

@@ -2,7 +2,7 @@
 
 ## 文本模型路由
 
-`RoutedTextProvider` 支持 `LAI_TEXT_PROVIDER=auto | openai | openrouter | mock`。`auto` 会先检测 OpenAI，再检测 OpenRouter；都没有密钥时使用 `MockTextProvider`。公开测试站显式使用 `openrouter`，通过 OpenRouter Chat Completions API 调用 `openrouter/free` 免费模型路由；正式切回 Codex 时设置为 `openai`。
+`RoutedTextProvider` 支持 `LAI_TEXT_PROVIDER=auto | openai | pollinations | openrouter | mock`。`auto` 会依次检测 OpenAI、Pollinations 文本 Key 与 OpenRouter；都没有密钥时只在本地开发模式使用 `MockTextProvider`。公开测试站显式使用 `pollinations`，通过 OpenAI 兼容的 Chat Completions API 调用只允许 `nemotron-3.5-lightning` 的 Quest Pollen Key；正式切回 Codex 时设置为 `openai`。
 
 OpenAI 请求只在服务端发出，使用 `store: false`，默认推理强度为 `low`。可通过 `OPENAI_MODEL` 与 `OPENAI_REASONING_EFFORT` 调整。API Key、组织 ID 和项目 ID 不会返回浏览器或写入日志。
 
@@ -13,9 +13,9 @@ OpenAI 请求只在服务端发出，使用 `store: false`，默认推理强度�
 ## 本地真实能力与演示替代
 
 - `LocalDocumentParser` 会在服务端真实读取 TXT、Markdown、CSV、PDF 文本层、DOCX、PPTX 和 XLSX。JPG/PNG 在配置 OpenRouter 时通过支持图片输入的 `openrouter/free` 路由识别；没有视觉模型或识别失败时，原图仍保存并明确提示，不伪装成已提取正文。
-- `DeterministicStoryboardImageProvider` 会真实生成并保存 SVG 构图预览，适合验收五张主图 Storyboard、中文图层和安全区；它不是扩散模型生成的商品精修图。
-- Remotion Player 会在浏览器真实执行三套视频模板。MP4 服务端渲染尚未启用，页面明确标注。
-- `MockTextProvider`、`MockVoiceProvider` 和 `MockVideoProvider` 只在没有外部能力时保证流程可演示，不冒充外部生产服务。
+- `RoutedImageProvider` 在生产真实模式调用 Pollinations 图像模型；`Sharp` 再把品牌名、商品名、已确认规格/价格/日期与 CTA 稳定排版为 1024×1024 PNG。没有图像 Key 或调用失败时会明确报错，不会回退 SVG 冒充商品图。
+- Remotion Player 与服务端 Renderer 使用同一套组合。导出接口真实生成 H.264 MP4、PNG 封面与 SRT 字幕，并按内容哈希缓存成片。
+- `MockTextProvider`、`MockVoiceProvider`、`MockVideoProvider` 与确定性 SVG 只用于本地开发和自动测试；`LAI_REQUIRE_LIVE_OUTPUTS=true` 时禁止进入公开生成链路。
 
 ## Provider 合同
 
@@ -26,7 +26,7 @@ OpenAI 请求只在服务端发出，使用 `store: false`，默认推理强度�
 - 文本模型：OpenAI Responses API 与 OpenRouter 免费路由均已接入；Anthropic、Gemini 当前只提供配置状态 Adapter。
 - 文档：内置本地解析器负责常用格式；Docling/RAGFlow 是复杂版面、OCR 和大型知识库的可选升级，所有结果仍要经过事实确认。
 - 图像：ComfyUI 等服务必须通过 SSRF allowlist，产品外观和文字保真由审核负责。
-- 视频：Remotion 模板可本地预览；服务端渲染需单独确认算力与许可证。
+- 视频：Remotion 模板可本地预览并由服务端逐帧渲染；部署环境需要 Chromium、足够的 CPU/内存，并需单独核验许可证。
 - 工作流：n8n/Dify 可消费 REST/MCP/A2A，但不能绕过本平台权限和人工审核。
 
 ## 配置原则

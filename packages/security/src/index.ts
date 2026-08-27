@@ -81,10 +81,17 @@ export function validateOutboundUrl(raw: string, options: { allowHosts?: string[
 }
 
 export interface VirusScanner { name: string; scan(bytes: Uint8Array): Promise<{ clean: boolean; threat?: string }> }
-export class MockVirusScanner implements VirusScanner {
-  name = "mock-clamav-interface";
+export class UploadSafetyScanner implements VirusScanner {
+  name = "local-upload-safety-v1";
   async scan(bytes: Uint8Array) {
-    const marker = Buffer.from(bytes).toString("utf8", 0, Math.min(bytes.length, 256));
-    return marker.includes("EICAR-STANDARD-ANTIVIRUS-TEST-FILE") ? { clean: false, threat: "EICAR test signature" } : { clean: true };
+    const head = Buffer.from(bytes.subarray(0, Math.min(bytes.length, 4096)));
+    const marker = head.toString("latin1");
+    if (marker.includes("EICAR-STANDARD-ANTIVIRUS-TEST-FILE")) return { clean: false, threat: "EICAR test signature" };
+    if (head[0] === 0x4d && head[1] === 0x5a) return { clean: false, threat: "Windows executable signature" };
+    if (head[0] === 0x7f && head[1] === 0x45 && head[2] === 0x4c && head[3] === 0x46) return { clean: false, threat: "ELF executable signature" };
+    if (["feedface", "feedfacf", "cefaedfe", "cffaedfe"].includes(head.subarray(0,4).toString("hex"))) return { clean: false, threat: "Mach-O executable signature" };
+    if (/\/JavaScript\b|\/Launch\b|<script\b|powershell(?:\.exe)?\b|cmd(?:\.exe)?\s+\/c/i.test(marker)) return { clean: false, threat: "active-content signature" };
+    return { clean: true };
   }
 }
+export class MockVirusScanner extends UploadSafetyScanner {}

@@ -49,12 +49,12 @@ test("新手工作台可以从一句话生成第一版内容", async ({ page }) 
   await page.getByRole("button", { name: /AI 商品图/ }).click();
   await page.getByLabel("用一句话说说你的要求").fill("生成一张方形商品主图，不要编造价格、规格和功效文字");
   await page.getByRole("button", { name: "帮我生成第一版" }).click();
-  await expect(page.getByRole("img", { name: "AI 生成的商品主图草稿" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "AI 生成并完成中文信息排版的商品主图" })).toBeVisible();
   await expect(page.getByRole("link", { name: "下载原图" })).toBeVisible();
 
   await page.getByRole("link", { name: /进入专业模式/ }).click();
   await expect(page.getByRole("heading", { name: "先选业务任务，不从空白提示词开始" })).toBeVisible();
-  await page.getByPlaceholder("例如：给这款燕麦杯写一个30秒短视频脚本").fill("为草莓燕麦杯生成30秒短视频脚本，价格未确认时必须留空");
+  await page.getByPlaceholder("例如：根据我上传的资料写一个30秒短视频脚本").fill("为草莓燕麦杯生成30秒短视频脚本，价格未确认时必须留空");
   await page.getByRole("button", { name: "生成专业提示词" }).click();
   await expect(page.getByRole("heading", { name: "提示词结果" })).toBeVisible();
   await expect(page.getByText("同一事实快照", { exact: false })).toBeVisible();
@@ -121,9 +121,10 @@ test("商业 Demo 的资料、事实、版本、图片、视频、审核和导�
   await expect(page.getByText("整套活动已生成", { exact: false })).toBeVisible({ timeout: 20_000 });
 
   await page.getByRole("button", { name: "图片", exact: true }).click();
-  await expect(page.getByRole("img", { name: /主图预览/ })).toBeVisible();
+  await expect(page.locator("img").last()).toBeVisible();
   await page.getByRole("button", { name: "视频", exact: true }).click();
-  await expect(page.getByRole("link", { name: "打开可播放预览" })).toHaveAttribute("href", /video-preview/);
+  await expect(page.locator("video")).toBeVisible();
+  await expect(page.getByRole("link", { name: "下载 MP4" })).toHaveAttribute("href", /format=mp4/);
 
   await page.getByRole("button", { name: "方案", exact: true }).click();
   await page.getByRole("button", { name: "编辑", exact: true }).click();
@@ -152,12 +153,12 @@ test("商业 Demo 的资料、事实、版本、图片、视频、审核和导�
   expect(xlsxResponse.headers()["content-type"]).toContain("spreadsheetml");
   expect((await xlsxResponse.body()).subarray(0, 2).toString()).toBe("PK");
 
-  const imageRow = page.locator("li.list-item").filter({ hasText: "主图预览" }).first();
+  const imageRow = page.locator("li.list-item").filter({ hasText: "本地构图预览" }).first();
   const svgResponse = await page.request.get((await imageRow.getByRole("link", { name: "原图", exact: true }).getAttribute("href"))!);
   expect(svgResponse.headers()["content-type"]).toContain("image/svg+xml");
   expect(await svgResponse.text()).toContain("<svg");
 
-  const videoRow = page.locator("li.list-item").filter({ hasText: "Remotion 视频草稿" }).first();
+  const videoRow = page.locator("li.list-item").filter({ hasText: "可下载 MP4 商品视频" }).first();
   const videoZipResponse = await page.request.get((await videoRow.getByRole("link", { name: "项目包 ZIP", exact: true }).getAttribute("href"))!);
   expect(videoZipResponse.headers()["content-type"]).toContain("application/zip");
   expect((await videoZipResponse.body()).subarray(0, 2).toString()).toBe("PK");

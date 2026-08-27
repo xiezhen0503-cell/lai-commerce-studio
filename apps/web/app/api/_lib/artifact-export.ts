@@ -2,7 +2,7 @@ import { Document, HeadingLevel, Packer, Paragraph } from "docx";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
 
-export type ArtifactExportFormat = "md" | "txt" | "html" | "json" | "csv" | "xlsx" | "docx" | "original" | "svg" | "zip";
+export type ArtifactExportFormat = "md" | "txt" | "html" | "json" | "csv" | "xlsx" | "docx" | "original" | "svg" | "zip" | "mp4" | "png" | "srt";
 
 type ArtifactRecord = {
   id: string;
@@ -36,13 +36,14 @@ const STRUCTURED_TYPES = new Set(["storyboard", "video-storyboard", "schedule", 
 
 export function artifactExportFormats(type: string): ArtifactExportFormat[] {
   if (type === "image") return ["original", "json", "svg"];
-  if (type === "video") return ["zip", "json", "html"];
+  if (type === "video") return ["mp4", "png", "srt", "zip", "json", "html"];
   if (STRUCTURED_TYPES.has(type)) return ["json", "xlsx", "csv", "docx"];
   if (TEXT_TYPES.has(type)) return ["md", "docx", "html", "txt", "json"];
   return ["json", "txt"];
 }
 
 export function defaultArtifactExportFormat(type: string) {
+  if (type === "video") return "zip";
   return artifactExportFormats(type)[0]!;
 }
 
@@ -182,16 +183,37 @@ function videoPreviewHtml(input: ArtifactExportInput) {
 
 async function videoZip(input: ArtifactExportInput) {
   const zip = new JSZip();
-  zip.file("README.md", `# ${input.artifact.title}\n\n这是 LaiCommerce Studio 可继续编辑的 Remotion 视频项目包，不是 MP4 成片。\n\n- 模板配置：remotion-project.json\n- 离线动画预览：preview.html\n- 事实快照：${input.version.factSnapshotId}\n- 成果版本：v${input.version.version}\n`);
+  zip.file("README.md", `# ${input.artifact.title}\n\n这是 LaiCommerce Studio 可继续编辑的视频项目包。MP4 成片、PNG 封面和 SRT 字幕可在工作台的同一成果下载。\n\n- 模板配置：remotion-project.json\n- 离线动画预览：preview.html\n- 事实快照：${input.version.factSnapshotId}\n- 成果版本：v${input.version.version}\n`);
   zip.file("remotion-project.json", jsonEnvelope(input));
   zip.file("preview.html", videoPreviewHtml(input));
   return Buffer.from(await zip.generateAsync({ type: "uint8array", compression: "DEFLATE", compressionOptions: { level: 6 } }));
+}
+
+function srtTime(seconds: number) {
+  const milliseconds = Math.max(0, Math.round(seconds * 1000));
+  const hours = Math.floor(milliseconds / 3_600_000);
+  const minutes = Math.floor((milliseconds % 3_600_000) / 60_000);
+  const secs = Math.floor((milliseconds % 60_000) / 1000);
+  const millis = milliseconds % 1000;
+  return `${String(hours).padStart(2,"0")}:${String(minutes).padStart(2,"0")}:${String(secs).padStart(2,"0")},${String(millis).padStart(3,"0")}`;
+}
+
+function subtitleDocument(input: ArtifactExportInput) {
+  const parsed = safeJson(input.version.content) as { captions?: Array<{ start?: unknown; end?: unknown; text?: unknown }> } | undefined;
+  const rows = (parsed?.captions ?? []).flatMap((item) => {
+    const start = Number(item.start); const end = Number(item.end); const text = String(item.text ?? "").trim();
+    return Number.isFinite(start) && Number.isFinite(end) && end > start && text ? [{ start, end, text }] : [];
+  });
+  if (!rows.length) throw new Error("这个视频成果没有可导出的字幕时间轴");
+  return rows.map((item,index)=>`${index+1}\n${srtTime(item.start)} --> ${srtTime(item.end)}\n${item.text}\n`).join("\n");
 }
 
 export async function buildArtifactExport(input: ArtifactExportInput, requested?: string | null): Promise<ArtifactExportFile> {
   const formats = artifactExportFormats(input.artifact.type);
   const format = (requested || defaultArtifactExportFormat(input.artifact.type)) as ArtifactExportFormat;
   if (!formats.includes(format)) throw new Error(`成果类型 ${input.artifact.type} 不支持 ${format} 导出；可用格式：${formats.join("、")}`);
+  if (format === "mp4" || format === "png") throw new Error(`${format.toUpperCase()} 需要由视频渲染服务生成`);
+  if (format === "srt") return { bytes: Buffer.from(subtitleDocument(input)), contentType: "application/x-subrip; charset=utf-8", extension: "srt", format };
   if (format === "original") return originalImage(input);
   if (format === "svg") return { bytes: imageSvg(input), contentType: "image/svg+xml; charset=utf-8", extension: "svg", format };
   if (format === "zip") return { bytes: await videoZip(input), contentType: "application/zip", extension: "zip", format };

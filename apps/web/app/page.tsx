@@ -28,8 +28,8 @@ export default async function HomePage() {
   return <BeginnerWorkbench initial={{
     projectId: data.project.id,
     projectName: data.project.name,
-    productName: product?.name ?? "演示商品",
-    specification: product?.specification ?? "规格待补充",
+    productName: product?.status === "confirmed" ? product.name : "尚未识别商品",
+    specification: product?.status === "confirmed" ? product.specification : "上传资料后自动识别",
     platforms: data.project.targetPlatforms,
     sourceNames: data.sources.map((source) => source.fileName),
     confirmedFacts: confirmedFacts.map((fact) => ({ type: fact.type, value: fact.value })),

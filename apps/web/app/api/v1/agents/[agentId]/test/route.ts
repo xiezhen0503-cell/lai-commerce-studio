@@ -15,7 +15,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ age
     return ok({
       status: "reachable",
       account: { id: account.id, name: account.name, scopes: account.scopes, projectIds: allowedProjects.map((project) => project.id) },
-      protocols: { rest: true, mcp: true, a2a: true },
+      protocols: { rest: true, mcp: Boolean(process.env.MCP_PUBLIC_URL), a2a: Boolean(process.env.A2A_PUBLIC_URL) },
+      endpoints: { rest: "/api/v1", mcp: process.env.MCP_PUBLIC_URL || null, a2a: process.env.A2A_PUBLIC_URL || null },
       discovery: { tools: MCP_TOOL_NAMES.length, prompts: MCP_PROMPT_NAMES.length },
       checkedAt: new Date().toISOString()
     });
