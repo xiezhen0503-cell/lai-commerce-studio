@@ -63,7 +63,7 @@ export function ProjectWorkspace({ initial }: { initial: any }) {
     setLoading("bundle");
     const response=await fetch("/api/v1/campaigns",{method:"POST",headers:{"content-type":"application/json","idempotency-key":`project-${Date.now()}`},body:JSON.stringify({projectId})});
     const json=await response.json();setLoading("");
-    if(response.ok){setToast(`整套活动已生成 ${json.data.artifactIds?.length||0} 项；高风险字段仍需人工审核`);await refresh(json.data.artifactIds?.[0]);}else setToast(json.error?.message||"整套活动生成失败");
+    if(response.ok){await refresh(json.data.artifactIds?.[0]);setToast(`整套活动已生成 ${json.data.artifactIds?.length||0} 项；高风险字段仍需人工审核`);}else setToast(json.error?.message||"整套活动生成失败");
   }
 
   async function review(){

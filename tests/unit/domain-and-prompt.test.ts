@@ -38,4 +38,28 @@ describe("领域模型与提示词引擎", () => {
     expect(evaluatePrompt(context.spec, context.snapshot).total).toBeGreaterThan(50);
     service.repo.close();
   });
+
+  it("自由创作模式无需资料并把具体商品信息标为待确认", () => {
+    const service = serviceForTest();
+    const result = service.generatePrompt(DEMO_PROJECT_ID, "为一款东方茶饮设计小红书新品创意", "creative");
+    const context = service.makeCompileContext(DEMO_PROJECT_ID, result.spec.objective, "creative");
+    context.spec = result.spec;
+    const markdown = compilePrompt(context, "markdown") as string;
+    const evaluation = evaluatePrompt(context.spec, context.snapshot);
+    expect(result.spec.variables.generationMode).toBe("creative");
+    expect(result.spec.variables.activeSkills).toEqual(expect.arrayContaining(["intent-to-brief", "ecommerce-plan-generator", "platform-adapter", "artifact-qa-and-compliance"]));
+    expect(result.spec.sourceDocumentIds).toEqual([]);
+    expect(result.explanation.sources).toEqual([]);
+    expect(result.explanation.confirmedFacts).toEqual([]);
+    expect(result.explanation.missing.join(" ")).toContain("待确认");
+    expect(markdown).toContain("自由创作模式");
+    expect(markdown).toContain("已启用的专业技能");
+    expect(markdown).toContain("ecommerce-plan-generator");
+    expect(markdown).toContain("无需引用资料");
+    expect(markdown).toContain("创意假设 / 待确认");
+    expect(context.sourceExcerpts).toEqual([]);
+    expect(evaluation.blockers).toEqual([]);
+    expect(evaluation.risk).not.toBe("blocked");
+    service.repo.close();
+  });
 });

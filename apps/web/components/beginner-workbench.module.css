@@ -96,6 +96,15 @@
 .sectionLabel { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 11px; }
 .sectionLabel span { font-size: 12px; font-weight: 850; }
 .sectionLabel small { color: #85889e; font-size: 9px; }
+.modeSwitch { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; margin-bottom: 12px; }
+.modeSwitch button { display: flex; align-items: center; gap: 11px; min-width: 0; padding: 13px 14px; text-align: left; border: 1px solid #dedfe9; border-radius: 13px; color: #686b80; background: #fafbfc; }
+.modeSwitch button > svg { flex: 0 0 auto; color: #7771cf; }
+.modeSwitch button span,.modeSwitch button strong,.modeSwitch button small { display: block; }
+.modeSwitch button strong { color: #34344c; font-size: 10px; }
+.modeSwitch button small { margin-top: 4px; color: #85889e; font-size: 8px; }
+.modeSwitch button.modeSelected { border-color: var(--violet); background: #eeecff; box-shadow: inset 0 0 0 1px var(--violet); }
+.modeSwitch button.modeSelected strong { color: #4037ac; }
+.modeNotice { margin: 0 0 18px; padding: 9px 11px; border-radius: 9px; color: #895912; background: #fff2de; font-size: 9px; line-height: 1.5; }
 .taskGrid { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 8px; margin-bottom: 24px; }
 .taskButton { position: relative; display: grid; gap: 12px; min-width: 0; padding: 14px 12px; text-align: left; border: 1px solid #e1e2eb; border-radius: 13px; color: #62657a; background: #fafbfc; transition: transform .18s,border-color .18s,background .18s; }
 .taskButton:hover { transform: translateY(-1px); border-color: #aaa5eb; }
@@ -153,6 +162,7 @@
 .evidence h3 { margin-bottom: 16px; font-size: 11px; }
 .evidenceRow { display: flex; align-items: center; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid #efeff4; color: #7b7e91; font-size: 9px; }
 .evidenceRow strong { color: #3b3b51; }
+.skillList { margin-top: 12px; padding: 10px; border-radius: 9px; color: #4f4a9b; background: #efedff; font: 700 8px/1.65 ui-monospace,monospace; overflow-wrap: anywhere; }
 .missingBox { margin-top: 13px; padding: 10px; border-radius: 9px; color: #875919; background: #fff2de; font-size: 8px; line-height: 1.55; }
 .projectLink { display: flex; align-items: center; justify-content: center; gap: 4px; min-height: 36px; margin-top: 16px; border-radius: 9px; color: white; background: var(--night); font-size: 9px; font-weight: 850; }
 
@@ -177,6 +187,7 @@
   .factTicket { order: 2; }
   .composer { padding: 20px 16px; }
   .taskGrid { grid-template-columns: repeat(2,1fr); }
+  .modeSwitch { grid-template-columns: 1fr; }
   .taskButton:last-child { grid-column: 1 / -1; }
   .promptFooter { align-items: stretch; flex-direction: column; }
   .promptFooter > div { padding: 2px 5px; }

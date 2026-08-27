@@ -5,7 +5,7 @@ import type { AgentHandoff, Artifact, ArtifactVersion, BrandProfile, CampaignBun
 import { AgentHandoffSchema, ArtifactTypeSchema as ArtifactTypeValidator, FactSchema, ProjectSchema, PromptSpecSchema, newId, nowIso } from "@lai/domain";
 import { getRepository, type CommerceRepository } from "@lai/database";
 import { authorize, defaultAgentPrincipal, type AgentPrincipal } from "@lai/permissions";
-import { buildPromptVariants, compilePrompt, evaluatePrompt, retrieveSourceExcerpts, type CompileContext } from "@lai/prompt-engine";
+import { buildPromptVariants, compilePrompt, evaluatePrompt, generationModeFor, retrieveSourceExcerpts, type CompileContext, type GenerationMode } from "@lai/prompt-engine";
 import { providerRegistry } from "@lai/providers";
 import { createAgentToken, hashToken, redact, signWebhook } from "@lai/security";
 import { z } from "zod";
@@ -26,7 +26,8 @@ const checksumFacts = (facts: Fact[]) => crypto.createHash("sha256").update(JSON
 
 function buildGroundedImagePrompt(context: CompileContext, referenceImageUsed: boolean) {
   const product = context.products[0]!;
-  const confirmedFacts = context.snapshot.facts
+  const creative = generationModeFor(context.spec) === "creative";
+  const confirmedFacts = (creative ? [] : context.snapshot.facts)
     .filter((fact) => ["verified", "user-confirmed"].includes(fact.status) && fact.value)
     .slice(0, 12)
     .map((fact) => `${fact.type}: ${fact.value}${fact.unit ? ` ${fact.unit}` : ""}`);
@@ -39,8 +40,9 @@ USER OBJECTIVE
 ${context.spec.objective}
 
 PRODUCT CONTEXT
-Brand: ${context.brand.name}
-Product: ${product.name}
+Mode: ${creative ? "Free creative concept without reference materials" : "Source-grounded product production"}
+Brand: ${creative ? "Unspecified; use no real trademark" : context.brand.name}
+Product: ${creative ? "Infer only a generic product category from the user objective" : product.name}
 Target platforms: ${context.spec.targetPlatforms.join(", ")}
 Audience: ${context.spec.targetAudience}
 Confirmed facts only:
@@ -70,14 +72,15 @@ async function composeUsableProductImage(assetUri: string, context: CompileConte
   const match = assetUri.match(/^data:(image\/(?:png|jpe?g|webp|svg\+xml));base64,(.+)$/i);
   if (!match?.[2]) throw new Error("图片模型返回的文件无法进入确定性排版，请重新生成。");
   const product = context.products[0]!;
-  const productName = confirmedFactValue(context, ["商品名称", "产品名称"]) || product.name;
-  const specification = confirmedFactValue(context, ["规格", "净含量"]) || product.specification;
-  const price = confirmedFactValue(context, ["活动价", "售价", "价格"]);
-  const date = confirmedFactValue(context, ["活动时间", "活动日期"]);
-  const brandName = context.brand.name;
+  const creative = generationModeFor(context.spec) === "creative";
+  const productName = creative ? "商品创意概念图" : confirmedFactValue(context, ["商品名称", "产品名称"]) || product.name;
+  const specification = creative ? undefined : confirmedFactValue(context, ["规格", "净含量"]) || product.specification;
+  const price = creative ? undefined : confirmedFactValue(context, ["活动价", "售价", "价格"]);
+  const date = creative ? undefined : confirmedFactValue(context, ["活动时间", "活动日期"]);
+  const brandName = creative ? "AI 自由创作" : context.brand.name;
   const safeColor = /^#[0-9a-f]{6}$/i.test(context.brand.colors[0] || "") ? context.brand.colors[0]! : "#242064";
   const accent = /^#[0-9a-f]{6}$/i.test(context.brand.colors[1] || "") ? context.brand.colors[1]! : "#a9f0d2";
-  const detailLines = [specification && `规格：${specification}`, price && `活动价：${price}`, date && `活动时间：${date}`].filter(Boolean) as string[];
+  const detailLines = creative ? ["具体商品信息待确认"] : [specification && `规格：${specification}`, price && `活动价：${price}`, date && `活动时间：${date}`].filter(Boolean) as string[];
   const lineMarkup = detailLines.slice(0, 3).map((line, index) => `<text x="70" y="${790 + index * 46}" fill="#ffffff" font-size="28" font-weight="600">${escapeSvgText(line)}</text>`).join("");
   const overlay = Buffer.from(`<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
     <defs><linearGradient id="fade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${safeColor}" stop-opacity="0"/><stop offset="0.38" stop-color="${safeColor}" stop-opacity="0.86"/><stop offset="1" stop-color="${safeColor}" stop-opacity="0.98"/></linearGradient></defs>
@@ -97,6 +100,17 @@ async function composeUsableProductImage(assetUri: string, context: CompileConte
 
 function firstMeaningfulLine(markdown: string, fallback: string) {
   return markdown.split(/\r?\n/).map((line) => line.replace(/^#+\s*/, "").replace(/^[-*]\s*/, "").trim()).find((line) => line.length >= 4)?.slice(0, 32) || fallback;
+}
+
+function activeSkillsForTask(taskType: string, generationMode: GenerationMode) {
+  const primary = taskType === "short-video-script"
+    ? "ecommerce-script-writer"
+    : taskType === "image-creative"
+      ? "image-prompt-and-production"
+      : taskType === "video-storyboard"
+        ? "video-storyboard-director"
+        : "ecommerce-plan-generator";
+  return ["intent-to-brief", ...(generationMode === "grounded" ? ["evidence-grounding"] : []), primary, "platform-adapter", "artifact-qa-and-compliance"];
 }
 
 function latestGeneratedImageUri(data: ReturnType<CommerceService["getProject"]>) {
@@ -374,7 +388,7 @@ export class CommerceService {
     return { fact: updated, snapshot, affectedArtifactIds: affected.map((item) => item.id) };
   }
 
-  makeCompileContext(projectId: string, objective: string): CompileContext {
+  makeCompileContext(projectId: string, objective: string, generationMode: GenerationMode = "grounded"): CompileContext {
     const data = this.getProject(projectId);
     const brand = data.brand;
     const products = data.products as Product[];
@@ -382,20 +396,22 @@ export class CommerceService {
     const snapshot = data.snapshots.find((item) => item.id === data.project.currentFactSnapshotId) ?? data.snapshots[0] ?? createFactSnapshot(projectId, "platform", this.repo);
     const taskType = objective.includes("脚本") ? "short-video-script" : objective.includes("图片") || objective.includes("海报") ? "image-creative" : objective.includes("视频") ? "video-storyboard" : "campaign-plan";
     const now = nowIso();
-    const sourceExcerpts = retrieveSourceExcerpts(data.sources, objective);
+    const sourceExcerpts = generationMode === "grounded" ? retrieveSourceExcerpts(data.sources, objective) : [];
     const retrievedSourceIds = [...new Set(sourceExcerpts.map((item) => item.sourceId))];
     const sourceNames = [...new Set(sourceExcerpts.map((item) => item.fileName))];
-    const confirmedValues = snapshot.facts.filter((fact) => ["verified", "user-confirmed"].includes(fact.status) && fact.value).map((fact) => fact.value);
-    const spec = PromptSpecSchema.parse({ id: newId("ps"), name: `${data.project.name} · ${objective.slice(0, 24)}`, version: 1, taskType, objective, businessGoal: data.project.businessGoal, projectId, brandId: brand.id, productIds: products.map((item) => item.id), targetAudience: data.project.targetAudience, targetPlatforms: data.project.targetPlatforms, contextReferences: [`laicommerce://projects/${projectId}`, `laicommerce://projects/${projectId}/facts`, ...retrievedSourceIds.map((id) => `laicommerce://sources/${id}`)], sourceDocumentIds: retrievedSourceIds, factSnapshotId: snapshot.id, requiredFacts: ["商品名称", "规格", "活动价", "活动时间"], creativePreferences: ["具体场景", "一条内容只讲一个利益点", "避免模板化三段式"], tone: brand.tone, style: "清醒、具体、有生活场景", deliverables: taskType === "short-video-script" ? ["30 秒短视频脚本", "3 个 A/B 开场", "事实来源与风险提示"] : taskType === "image-creative" ? ["5 张主图 Storyboard", "图片提示词", "确定性叠字清单"] : taskType === "video-storyboard" ? ["30 秒视频分镜", "素材清单", "字幕与安全区"] : ["新品上市方案", "短视频脚本", "5 张主图 Storyboard", "视频分镜", "风险清单"], outputFormat: "使用中文 Markdown，并为每个事实型结论标注来源；最后列出待确认事项。", outputSchema: { executiveSummary: { type: "string" }, strategy: { type: "array" }, deliverables: { type: "array" }, evidence: { type: "array" }, risks: { type: "array" } }, constraints: ["不改变已确认规格", "事实变化后必须重新复核", "人工内容不可静默覆盖"], mustInclude: confirmedValues.slice(0, 12), mustAvoid: [...brand.bannedWords, ...products.flatMap((item) => item.prohibitedClaims)], evidencePolicy: "事实型宣称必须引用当前事实快照或本次检索的资料片段；缺失就是缺失。", brandPolicy: `遵循${brand.name}的品牌语气：${brand.tone.join("、")}。`, compliancePolicy: "价格、规格、日期、资质、功效和发布动作必须人工确认。", qualityRubric: ["事实准确", "来源完整", "品牌一致", "利益点清楚", "平台适配", "可执行", "无高风险宣称"], variables: { objective, retrieval: { sourceIds: retrievedSourceIds, excerptCount: sourceExcerpts.length } }, examples: [], providerHints: { temperature: "隐藏高级项，由适配器决定" }, createdBy: "user_lai", createdAt: now, updatedAt: now });
+    const confirmedValues = generationMode === "grounded" ? snapshot.facts.filter((fact) => ["verified", "user-confirmed"].includes(fact.status) && fact.value).map((fact) => fact.value) : [];
+    const spec = PromptSpecSchema.parse({ id: newId("ps"), name: `${data.project.name} · ${objective.slice(0, 24)}`, version: 1, taskType, objective, businessGoal: data.project.businessGoal, projectId, brandId: brand.id, productIds: products.map((item) => item.id), targetAudience: data.project.targetAudience, targetPlatforms: data.project.targetPlatforms, contextReferences: generationMode === "creative" ? [`laicommerce://projects/${projectId}`] : [`laicommerce://projects/${projectId}`, `laicommerce://projects/${projectId}/facts`, ...retrievedSourceIds.map((id) => `laicommerce://sources/${id}`)], sourceDocumentIds: retrievedSourceIds, factSnapshotId: snapshot.id, requiredFacts: generationMode === "creative" ? [] : ["商品名称", "规格", "活动价", "活动时间"], creativePreferences: ["具体场景", "一条内容只讲一个利益点", "避免模板化三段式"], tone: brand.tone, style: "清醒、具体、有生活场景", deliverables: taskType === "short-video-script" ? ["30 秒短视频脚本", "3 个 A/B 开场", generationMode === "creative" ? "创意假设与待确认清单" : "事实来源与风险提示"] : taskType === "image-creative" ? ["5 张主图 Storyboard", "图片提示词", generationMode === "creative" ? "创意假设与待确认清单" : "确定性叠字清单"] : taskType === "video-storyboard" ? ["30 秒视频分镜", "素材清单", "字幕与安全区"] : ["新品上市方案", "短视频脚本", "5 张主图 Storyboard", "视频分镜", "风险清单"], outputFormat: generationMode === "creative" ? "使用中文 Markdown，直接给可编辑使用的完整创意草稿；单列“创意假设”和“发布前待确认”，不要伪造资料来源。" : "使用中文 Markdown，并为每个事实型结论标注来源；最后列出待确认事项。", outputSchema: { executiveSummary: { type: "string" }, strategy: { type: "array" }, deliverables: { type: "array" }, evidence: { type: "array" }, risks: { type: "array" } }, constraints: generationMode === "creative" ? ["不得把创意假设标为已确认事实", "不得声称读取过不存在的资料", "人工内容不可静默覆盖"] : ["不改变已确认规格", "事实变化后必须重新复核", "人工内容不可静默覆盖"], mustInclude: confirmedValues.slice(0, 12), mustAvoid: [...brand.bannedWords, ...products.flatMap((item) => item.prohibitedClaims)], evidencePolicy: generationMode === "creative" ? "无需引用资料；允许自由创作，但所有具体商品事实默认待确认，禁止伪造来源。" : "事实型宣称必须引用当前事实快照或本次检索的资料片段；缺失就是缺失。", brandPolicy: generationMode === "creative" ? "用户未指定品牌时使用中性商业表达，不虚构现实品牌、商标或背书。" : `遵循${brand.name}的品牌语气：${brand.tone.join("、")}。`, compliancePolicy: "价格、规格、日期、资质、功效和发布动作必须人工确认。", qualityRubric: generationMode === "creative" ? ["创意完整", "场景具体", "利益点清楚", "平台适配", "可继续编辑", "假设标识清楚", "无高风险宣称"] : ["事实准确", "来源完整", "品牌一致", "利益点清楚", "平台适配", "可执行", "无高风险宣称"], variables: { objective, generationMode, retrieval: { sourceIds: retrievedSourceIds, excerptCount: sourceExcerpts.length } }, examples: [], providerHints: { temperature: "隐藏高级项，由适配器决定" }, createdBy: "user_lai", createdAt: now, updatedAt: now });
+    spec.variables.activeSkills = activeSkillsForTask(taskType, generationMode);
     return { spec, snapshot, brand, products, sourceNames, sourceExcerpts };
   }
 
-  generatePrompt(projectId: string, objective: string): PromptGenerationResult {
-    const context = this.makeCompileContext(projectId, objective);
+  generatePrompt(projectId: string, objective: string, generationMode: GenerationMode = "grounded"): PromptGenerationResult {
+    const context = this.makeCompileContext(projectId, objective, generationMode);
     const variants = buildPromptVariants(context);
     const evaluation = evaluatePrompt(context.spec, context.snapshot);
     const missing = context.snapshot.facts.filter((fact) => ["missing", "conflicting", "expired"].includes(fact.status));
-    const result = { spec: context.spec, variants, explanation: { objective, sources: context.sourceNames, confirmedFacts: context.snapshot.facts.filter((fact) => ["verified", "user-confirmed"].includes(fact.status)).map((fact) => `${fact.type}：${fact.value}`), missing: missing.map((fact) => `${fact.type}：${fact.status === "missing" ? "缺失" : fact.status}`), outputs: context.spec.deliverables, risks: evaluation.blockers.length ? evaluation.blockers : ["发布前仍需人工复核"], advice: ["先处理活动价等必须确认项", "简易版适合快速复制，专业版适合正式生产", "交接版只给获得项目权限的智能体"] }, evaluation };
+    const creative = generationMode === "creative";
+    const result = { spec: context.spec, variants, explanation: { objective, sources: context.sourceNames, confirmedFacts: creative ? [] : context.snapshot.facts.filter((fact) => ["verified", "user-confirmed"].includes(fact.status)).map((fact) => `${fact.type}：${fact.value}`), missing: creative ? ["商品名称、规格、价格、功效等具体事实：发布前待确认"] : missing.map((fact) => `${fact.type}：${fact.status === "missing" ? "缺失" : fact.status}`), outputs: context.spec.deliverables, risks: creative ? ["自由创作草稿没有资料背书，不可直接作为事实发布"] : evaluation.blockers.length ? evaluation.blockers : ["发布前仍需人工复核"], advice: creative ? ["先用自由创作找方向", "定稿前上传商品资料并切换资料驱动", "高风险字段必须人工确认"] : ["先处理活动价等必须确认项", "简易版适合快速复制，专业版适合正式生产", "交接版只给获得项目权限的智能体"] }, evaluation };
     this.repo.save("prompt_specs", context.spec, { workspaceId: DEMO_WORKSPACE_ID, projectId, version: context.spec.version });
     variants.forEach((variant) => this.repo.save("prompt_versions", { ...variant, promptSpecId: context.spec.id, projectId, factSnapshotId: context.snapshot.id, updatedAt: variant.createdAt }, { workspaceId: DEMO_WORKSPACE_ID, projectId, parentId: context.spec.id, version: context.spec.version }));
     this.repo.save("evaluations", evaluation, { workspaceId: DEMO_WORKSPACE_ID, projectId, status: evaluation.risk, parentId: context.spec.id });
@@ -406,7 +422,7 @@ export class CommerceService {
   async runPrompt(projectId: string, promptSpecId: string, artifactType: z.infer<typeof ArtifactTypeValidator> = "proposal") {
     const spec = this.repo.get<PromptSpec>("prompt_specs", promptSpecId);
     if (!spec || spec.projectId !== projectId) throw new CommerceError("PROMPT_NOT_FOUND", "没有找到这个项目的提示词", 404);
-    const context = this.makeCompileContext(projectId, spec.objective); context.spec = spec;
+    const context = this.makeCompileContext(projectId, spec.objective, generationModeFor(spec)); context.spec = spec;
     if (artifactType === "image") return this.runImagePrompt(projectId, promptSpecId, context);
     const structured = ["storyboard", "video-storyboard", "schedule", "handoff"].includes(artifactType);
     const taskLabel = this.titleForArtifact(artifactType);
@@ -450,15 +466,16 @@ export class CommerceService {
 
   buildVideoContent(context: CompileContext, generatedScript: string, imageUri?: string) {
     const product = context.products[0]!;
+    const creative = generationModeFor(context.spec) === "creative";
     const confirmed = (names: string[]) => confirmedFactValue(context, names);
-    const specification = confirmed(["规格", "净含量"]) || product.specification;
-    const productName = confirmed(["商品名称", "产品名称"]) || product.name;
-    const price = confirmed(["活动价", "售价", "价格"]);
+    const specification = creative ? undefined : confirmed(["规格", "净含量"]) || product.specification;
+    const productName = creative ? "商品创意概念" : confirmed(["商品名称", "产品名称"]) || product.name;
+    const price = creative ? undefined : confirmed(["活动价", "售价", "价格"]);
     const isFifteenSeconds = !/30\s*秒/.test(context.spec.objective);
     const duration = isFifteenSeconds ? 15 : 30;
     const headline = firstMeaningfulLine(generatedScript, context.spec.objective).slice(0, 28);
-    const subheadline = specification && !/待|请先/.test(specification) ? `${productName} · ${specification}` : `${productName} · 具体信息以项目确认事实为准`;
-    const cta = context.brand.ctas[0] || "查看商品详情";
+    const subheadline = creative ? "自由创作草稿 · 商品事实待确认" : specification && !/待|请先/.test(specification) ? `${productName} · ${specification}` : `${productName} · 具体信息以项目确认事实为准`;
+    const cta = creative ? "查看创意方案" : context.brand.ctas[0] || "查看商品详情";
     const captions = isFifteenSeconds ? [
       { start: 0, end: 4.5, text: headline },
       { start: 4.5, end: 10, text: subheadline },
@@ -472,7 +489,7 @@ export class CommerceService {
       schema: "laicommerce.video-render/v1",
       template: isFifteenSeconds ? "SellingPoint15" : "Promo30",
       props: {
-        brandName: context.brand.name,
+        brandName: creative ? "AI 自由创作" : context.brand.name,
         product: productName,
         specification,
         ...(price ? { price: `活动价：${price}` } : {}),
@@ -495,7 +512,8 @@ export class CommerceService {
 
   async runImagePrompt(projectId: string, promptSpecId: string, context: CompileContext) {
     const started = Date.now();
-    const imageSource = this.getProject(projectId).sources.find((source) => source.status === "parsed" && ["image/jpeg", "image/png"].includes(source.mimeType) && !source.storagePath.includes("://"));
+    const creative = generationModeFor(context.spec) === "creative";
+    const imageSource = creative ? undefined : this.getProject(projectId).sources.find((source) => source.status === "parsed" && ["image/jpeg", "image/png"].includes(source.mimeType) && !source.storagePath.includes("://"));
     const referenceImages: Array<{ dataUri: string }> = [];
     const canUseReferenceImage = providerRegistry.image.name === "pollinations-image" && Boolean(process.env.POLLINATIONS_API_KEY?.trim());
     if (imageSource && canUseReferenceImage) {
@@ -530,9 +548,11 @@ export class CommerceService {
         confirmedFacts: production.confirmedFacts,
         factSnapshotId: context.snapshot.id,
         referenceSourceId: referenceImages.length ? imageSource?.id : undefined,
-        warnings: referenceImages.length
-          ? ["已使用本项目上传的商品照片作为视觉参考；生成结果仍需人工对照包装。", "价格、规格、活动时间与 CTA 已由程序从确认事实中排版，不依赖图片模型拼写中文。"]
-          : ["没有找到可用的商品照片，本次是通用包装创意草稿，商品外观可能与实物不一致。", "价格、规格、活动时间与 CTA 已由程序从确认事实中排版，不依赖图片模型拼写中文。"]
+        warnings: creative
+          ? ["本次使用自由创作模式，没有把生成外观当作真实商品包装；具体品牌、规格、价格、功效和包装细节均待确认。", "图片可用于方向测试，定稿前请上传真实商品图并切换资料驱动模式。"]
+          : referenceImages.length
+            ? ["已使用本项目上传的商品照片作为视觉参考；生成结果仍需人工对照包装。", "价格、规格、活动时间与 CTA 已由程序从确认事实中排版，不依赖图片模型拼写中文。"]
+            : ["没有找到可用的商品照片，本次是通用包装创意草稿，商品外观可能与实物不一致。", "价格、规格、活动时间与 CTA 已由程序从确认事实中排版，不依赖图片模型拼写中文。"]
       }
     });
     const artifact = this.createArtifact(projectId, "image", "AI 商品主图", content, context.snapshot.id, promptSpecId, { type: "platform-ai", id: providerRegistry.image.name });
@@ -607,16 +627,21 @@ export class CommerceService {
     return template;
   }
 
-  async createCampaignBundle(projectId: string, objective = "一键生成整套新品上市活动"): Promise<CampaignBundleResult> {
-    const context = this.makeCompileContext(projectId, objective);
+  async createCampaignBundle(projectId: string, objective = "一键生成整套新品上市活动", generationMode: GenerationMode = "grounded"): Promise<CampaignBundleResult> {
+    const context = this.makeCompileContext(projectId, objective, generationMode);
     const job: GenerationJob = { id: newId("job"), workspaceId: DEMO_WORKSPACE_ID, projectId, type: "campaign-bundle", status: "running", progress: 15, stage: "建立事实快照与任务简报", resultArtifactIds: [], createdAt: nowIso(), updatedAt: nowIso() };
     this.repo.saveJob(job);
     try {
-      const prompt = this.generatePrompt(projectId, objective);
+      const prompt = this.generatePrompt(projectId, objective, generationMode);
+      prompt.spec.variables.activeSkills = ["intent-to-brief", ...(generationMode === "grounded" ? ["evidence-grounding"] : []), "campaign-orchestrator", "image-prompt-and-production", "video-storyboard-director", "video-renderer", "platform-adapter", "artifact-qa-and-compliance"];
+      this.repo.save("prompt_specs", prompt.spec, { workspaceId: DEMO_WORKSPACE_ID, projectId, version: prompt.spec.version });
       context.spec = prompt.spec;
       const textProvider = providerRegistry.text;
       job.progress = 28; job.stage = "真实模型生成整套文字与结构化内容"; job.updatedAt = nowIso(); this.repo.saveJob(job);
-      const bundleInstruction = `${compilePrompt(context)}\n\n你现在要一次完成整套电商内容生产。只返回一个严格 JSON 对象，不要 Markdown 代码围栏，不要省略字段。字段必须是：\n- proposal: 完整可执行方案 Markdown\n- script: 15秒短视频完整脚本 Markdown，含时间、画面、动作、口播、屏幕文字、证据\n- storyboard: 5项数组，每项含 index、role、headline、composition、overlay、evidence\n- imagePrompt: 可直接交给图片模型的完整中文/英文提示词 Markdown\n- videoStoryboard: 4到8项数组，每项含 start、end、shot、action、voice、overlay、evidence\n- caption: 目标平台可直接编辑使用的正文 Markdown\n- schedule: 7到14项数组，每项含 day、channel、content、metric、stopRule\n- report: 质量与合规报告 Markdown，逐项列证据、缺失和人工确认点\n所有事实只能使用事实快照；缺失字段写“待确认”，不要编造。`;
+      const bundleFactRule = generationMode === "creative"
+        ? "本次是自由创作模式：允许提出完整创意，但不得声称读取过资料；所有具体商品事实、数据、资质和功效默认写‘待确认’，并在报告中列出创意假设。"
+        : "所有事实只能使用事实快照；缺失字段写‘待确认’，不要编造。";
+      const bundleInstruction = `${compilePrompt(context)}\n\n你现在要一次完成整套电商内容生产。只返回一个严格 JSON 对象，不要 Markdown 代码围栏，不要省略字段。字段必须是：\n- proposal: 完整可执行方案 Markdown\n- script: 15秒短视频完整脚本 Markdown，含时间、画面、动作、口播、屏幕文字、证据\n- storyboard: 5项数组，每项含 index、role、headline、composition、overlay、evidence\n- imagePrompt: 可直接交给图片模型的完整中文/英文提示词 Markdown\n- videoStoryboard: 4到8项数组，每项含 start、end、shot、action、voice、overlay、evidence\n- caption: 目标平台可直接编辑使用的正文 Markdown\n- schedule: 7到14项数组，每项含 day、channel、content、metric、stopRule\n- report: 质量与合规报告 Markdown，逐项列证据、缺失和人工确认点\n${bundleFactRule}`;
       const generated = await textProvider.generate(prompt.spec, bundleInstruction);
       let campaign: { proposal: string; script: string; storyboard: unknown[]; imagePrompt: string; videoStoryboard: unknown[]; caption: string; schedule: unknown[]; report: string };
       if (generated.model === "mock-text-v1") {

@@ -20,6 +20,7 @@ type InitialContext = {
 type WorkbenchResponse = {
   data?: {
     prompt: {
+      spec?: { variables?: { activeSkills?: unknown } };
       evaluation: { total: number; blockers: string[] };
       explanation: { sources: string[]; confirmedFacts: string[]; missing: string[] };
     };
@@ -44,6 +45,8 @@ type Result = {
   provider: string;
   model: string;
   live: boolean;
+  generationMode: "creative" | "grounded";
+  skills: string[];
   video?: boolean;
   image?: {
     assetUri: string;
@@ -91,8 +94,15 @@ function providerHint(mode: InitialContext["ai"]["mode"]) {
   return "演示 AI 会检索已上传资料；配置服务端密钥后切换真实模型";
 }
 
+function creativeProviderHint(mode: InitialContext["ai"]["mode"]) {
+  if (mode === "openrouter" || mode === "pollinations") return "免费测试模型会直接创作；具体商品事实统一标为待确认";
+  if (mode === "openai") return "Codex 会直接创作；具体商品事实统一标为待确认";
+  return "演示 AI 会直接创作；配置服务端密钥后切换真实模型";
+}
+
 export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
   const [taskId,setTaskId] = useState<(typeof taskOptions)[number]["id"]>("script");
+  const [generationMode,setGenerationMode] = useState<"creative" | "grounded">(initial.sourceNames.length > 0 ? "grounded" : "creative");
   const [objective,setObjective] = useState<string>(taskOptions[1].example);
   const [platforms,setPlatforms] = useState(initial.platforms);
   const [sourceCount,setSourceCount] = useState(initial.sourceNames.length);
@@ -109,7 +119,7 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
   const resultRef = useRef<HTMLElement>(null);
 
   const selectedTask = taskOptions.find((item) => item.id === taskId) ?? taskOptions[0];
-  const ready = objective.trim().length >= 8 && platforms.length > 0 && sourceCount > 0;
+  const ready = objective.trim().length >= 8 && platforms.length > 0 && (generationMode === "creative" || sourceCount > 0);
 
   function chooseTask(id: (typeof taskOptions)[number]["id"]) {
     const next = taskOptions.find((item) => item.id === id) ?? taskOptions[0];
@@ -163,20 +173,21 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
     setError(""); setResult(undefined); setCopied(false);
     const fullObjective = `${objective.trim()}\n目标平台：${platforms.join("、")}`;
     setStage(taskId === "bundle" ? "正在生成整套真实内容，可能需要 2 分钟" : taskId === "image" ? "正在生成真实图片，可能需要 1 分钟" : taskId === "video" ? "正在生成脚本与视频渲染配置" : "正在核对事实并生成");
-    const response = await fetch("/api/v1/workbench/generate",{method:"POST",headers:{"content-type":"application/json","idempotency-key":`beginner-${Date.now()}`},body:JSON.stringify({projectId:initial.projectId,objective:fullObjective,task:taskId === "bundle" ? "bundle" : "single",artifactType:selectedTask.artifactType})});
+    const response = await fetch("/api/v1/workbench/generate",{method:"POST",headers:{"content-type":"application/json","idempotency-key":`beginner-${Date.now()}`},body:JSON.stringify({projectId:initial.projectId,objective:fullObjective,task:taskId === "bundle" ? "bundle" : "single",artifactType:selectedTask.artifactType,generationMode})});
     const json = await response.json() as WorkbenchResponse;
     setStage("");
     if (!response.ok || !json.data) { setError(json.error?.message || "内容没有生成成功，请再试一次"); return; }
     const prompt = json.data.prompt;
+    const activeSkills = Array.isArray(prompt.spec?.variables?.activeSkills) ? prompt.spec.variables.activeSkills.filter((item): item is string => typeof item === "string") : [];
 
     if (taskId === "bundle" && json.data.bundle) {
       const model = String(json.data.bundle.model || initial.ai.model);
-      setResult({title:"整套真实成果已经生成",content:"方案、脚本、五张主图规划、真实商品图、图片提示词、视频分镜、可渲染 MP4、平台文案、排期和质量报告已经放进项目。价格、活动时间等高风险字段仍会等待你确认。",score:prompt.evaluation.total,sources:prompt.explanation.sources,facts:prompt.explanation.confirmedFacts,missing:prompt.explanation.missing,bundleCount:json.data.bundle.artifactIds?.length || 0,provider:String(json.data.bundle.provider || initial.ai.provider),model,live:model!=="mock-text-v1"});
+      setResult({title:"整套真实成果已经生成",content:"方案、脚本、五张主图规划、真实商品图、图片提示词、视频分镜、可渲染 MP4、平台文案、排期和质量报告已经放进项目。价格、活动时间等高风险字段仍会等待你确认。",score:prompt.evaluation.total,sources:prompt.explanation.sources,facts:prompt.explanation.confirmedFacts,missing:prompt.explanation.missing,bundleCount:json.data.bundle.artifactIds?.length || 0,provider:String(json.data.bundle.provider || initial.ai.provider),model,live:model!=="mock-text-v1",generationMode,skills:activeSkills});
     } else {
       const generated = json.data.result;
       if (!generated) { setError("内容没有生成成功，请再试一次"); return; }
       const image = generated.artifact.type === "image" ? imageResult(generated.artifact.version.content) : undefined;
-      setResult({title:generated.artifact.title,content:generated.artifact.version.content,score:prompt.evaluation.total,sources:prompt.explanation.sources,facts:prompt.explanation.confirmedFacts,missing:prompt.explanation.missing,artifactId:generated.artifact.id,provider:generated.run.provider,model:generated.run.model,live:generated.run.model!=="mock-text-v1"&&generated.run.model!=="deterministic-storyboard-svg-v1",image,video:generated.artifact.type==="video"});
+      setResult({title:generated.artifact.title,content:generated.artifact.version.content,score:prompt.evaluation.total,sources:prompt.explanation.sources,facts:prompt.explanation.confirmedFacts,missing:prompt.explanation.missing,artifactId:generated.artifact.id,provider:generated.run.provider,model:generated.run.model,live:generated.run.model!=="mock-text-v1"&&generated.run.model!=="deterministic-storyboard-svg-v1",image,video:generated.artifact.type==="video",generationMode,skills:activeSkills});
     }
     setTimeout(() => resultRef.current?.scrollIntoView({behavior:"smooth",block:"start"}),50);
   }
@@ -198,12 +209,12 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
           </div>
         </div>
         <h1>不用学提示词，<br/><span>把想做的事说清楚就行。</span></h1>
-        <p>选一个内容类型，确认商品和平台，再用一句话告诉 AI。工作台会自动带上资料、事实和风险边界。</p>
+        <p>可以不上传资料直接自由创作，也可以让 AI 严格依据你上传的商品资料生成。</p>
       </div>
       <div className={styles.promise} aria-label="使用步骤">
         <div><span>1</span><strong>你说目标</strong><small>不用专业术语</small></div>
         <ChevronRight aria-hidden="true"/>
-        <div><span>2</span><strong>AI 查资料</strong><small>不凭空编数字</small></div>
+        <div><span>2</span><strong>选择创作方式</strong><small>自由创作或查资料</small></div>
         <ChevronRight aria-hidden="true"/>
         <div><span>3</span><strong>你拿结果</strong><small>高风险项再确认</small></div>
       </div>
@@ -211,7 +222,7 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
 
     <section className={styles.desk} aria-label="AI 内容生成工作台">
       <aside className={styles.factTicket}>
-        <div className={styles.ticketTop}><span>本次使用的资料</span><ShieldCheck size={18}/></div>
+        <div className={styles.ticketTop}><span>{generationMode === "creative" ? "本次创作上下文" : "本次使用的资料"}</span><ShieldCheck size={18}/></div>
         <div className={styles.productBlock}><div className={styles.productIcon}><Package size={21}/></div><div><small>当前商品</small><strong>{productName}</strong><span>{specification}</span></div></div>
         <div className={styles.ticketStats}>
           <div><strong>{sourceCount}</strong><span>份资料</span></div>
@@ -226,6 +237,13 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
       </aside>
 
       <main className={styles.composer}>
+        <div className={styles.sectionLabel}><span>先选创作方式</span><small>随时可以切换</small></div>
+        <div className={styles.modeSwitch} aria-label="创作方式">
+          <button type="button" aria-pressed={generationMode === "creative"} className={generationMode === "creative" ? styles.modeSelected : ""} onClick={() => { setGenerationMode("creative"); setResult(undefined); setError(""); }}><Sparkles size={16}/><span><strong>自由创作</strong><small>无需资料，直接让 AI 发挥</small></span></button>
+          <button type="button" aria-pressed={generationMode === "grounded"} className={generationMode === "grounded" ? styles.modeSelected : ""} onClick={() => { setGenerationMode("grounded"); setResult(undefined); setError(""); }}><FileCheck2 size={16}/><span><strong>资料驱动</strong><small>严格依据上传内容，更准确</small></span></button>
+        </div>
+        {generationMode === "grounded" && sourceCount === 0 && <div className={styles.modeNotice}>资料驱动需要先上传资料；如果只是想试创意，请切换“自由创作”。</div>}
+
         <div className={styles.sectionLabel}><span>先选要做什么</span><small>一次只做一件，结果更清楚</small></div>
         <div className={styles.taskGrid}>{taskOptions.map(({id,label,description,icon:Icon}) => <button key={id} type="button" aria-pressed={taskId===id} className={`${styles.taskButton} ${taskId===id?styles.selected:""}`} onClick={() => chooseTask(id)}><Icon/><span><strong>{label}</strong><small>{description}</small></span>{taskId===id&&<Check className={styles.taskCheck}/>}</button>)}</div>
 
@@ -235,10 +253,10 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
         <label className={styles.promptLabel} htmlFor="beginner-objective"><span>用一句话说说你的要求</span><small>{objective.length}/240</small></label>
         <div className={styles.promptBox}>
           <textarea id="beginner-objective" maxLength={240} value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="例如：写一条 30 秒短视频脚本，开头抓人，但不要夸大功效"/>
-          <div className={styles.promptFooter}><div><Sparkles size={13}/><span>{sourceCount > 0 ? providerHint(initial.ai.mode) : "请先上传至少一份资料，AI 才会开始生成"}</span></div><button type="button" onClick={generate} disabled={!ready || Boolean(stage)}>{stage?<LoaderCircle className={styles.spin} size={16}/>:<ArrowRight size={16}/>} {stage || (sourceCount > 0 ? "帮我生成第一版" : "先上传资料")}</button></div>
+          <div className={styles.promptFooter}><div><Sparkles size={13}/><span>{generationMode === "creative" ? creativeProviderHint(initial.ai.mode) : sourceCount > 0 ? providerHint(initial.ai.mode) : "资料驱动需要先上传至少一份资料"}</span></div><button type="button" onClick={generate} disabled={!ready || Boolean(stage)}>{stage?<LoaderCircle className={styles.spin} size={16}/>:<ArrowRight size={16}/>} {stage || (generationMode === "creative" || sourceCount > 0 ? "帮我生成第一版" : "先上传资料")}</button></div>
         </div>
         {error && <div className={styles.error} role="alert">{error}</div>}
-        <div className={styles.safeNote}><ShieldCheck size={14}/><span>先生成草稿，不会自动发布、花钱或修改店铺。</span><Link href="/prompt-lab">进入专业模式 <ChevronRight size={12}/></Link></div>
+        <div className={styles.safeNote}><ShieldCheck size={14}/><span>{generationMode === "creative" ? "自由创作会把商品事实标为待确认，不会伪装成已核验资料。" : "资料驱动只引用当前项目资料。"} 不会自动发布、花钱或修改店铺。</span><Link href="/prompt-lab">进入专业模式 <ChevronRight size={12}/></Link></div>
       </main>
     </section>
 
@@ -246,10 +264,10 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
       <div className={styles.resultHead}><div><div className={styles.resultEyebrow}><Check size={13}/> 第一版已完成</div><h2>{result.title}</h2><p>{result.bundleCount ? `共整理 ${result.bundleCount} 项内容，已放入当前项目。` : result.image ? "这是真实图片模型返回的图片草稿，可直接预览和下载原图。" : "你可以直接复制，也可以进入完整工作台继续修改。"}</p></div><div className={styles.score}><strong>{result.score}</strong><span>任务完整度</span></div></div>
       <div className={styles.resultBody}>
         <article className={styles.output}><div className={styles.outputToolbar}><div className={styles.outputIdentity}><span>{selectedTask.label}</span><small><Bot size={12}/>{providerDisplayName(result.provider, result.live)} · {result.model}</small></div><div className={styles.outputActions}><a className={styles.downloadLink} href={result.artifactId?`/api/v1/artifacts/${result.artifactId}/export`:`/api/v1/projects/${initial.projectId}/export`}><Download size={13}/>{result.bundleCount?"下载全部":result.image?"下载原图":result.video?"下载 MP4":"下载结果"}</a>{!result.image&&!result.video&&<button type="button" onClick={copyResult}><Clipboard size={13}/>{copied?"已复制":"复制结果"}</button>}</div></div>{result.image?<div className={styles.generatedImage}><img src={result.image.assetUri} alt="AI 生成并完成中文信息排版的商品主图"/><div className={styles.imageNotes}>{result.image.warnings.map((warning)=><p key={warning}><ShieldCheck size={13}/>{warning}</p>)}<details><summary>查看本次图片提示词</summary><pre>{result.image.prompt}</pre></details></div></div>:result.video&&result.artifactId?<div className={styles.generatedImage}><video controls playsInline preload="none" src={`/api/v1/artifacts/${result.artifactId}/export?format=mp4`} style={{width:"100%",maxHeight:620,background:"#111",borderRadius:16}}/><div className={styles.imageNotes}><p><ShieldCheck size={13}/>首次打开会由服务器逐帧渲染真实 MP4；完成后可以下载同一文件。</p><p><Download size={13}/><a href={`/api/v1/artifacts/${result.artifactId}/export?format=srt`}>下载 SRT 字幕</a> · <a href={`/api/v1/artifacts/${result.artifactId}/export?format=png`}>下载 PNG 封面</a></p></div></div>:<pre>{result.content}</pre>}</article>
-        <aside className={styles.evidence}><h3>AI 这次依据了什么</h3><div className={styles.evidenceRow}><span>当前模型</span><strong>{providerDisplayName(result.provider, result.live)}</strong></div><div className={styles.evidenceRow}><span>已确认事实</span><strong>{result.facts.length} 条</strong></div><div className={styles.evidenceRow}><span>引用资料</span><strong>{result.sources.length} 份</strong></div><div className={styles.evidenceRow}><span>待确认</span><strong>{result.missing.length} 项</strong></div>{result.missing.length>0&&<div className={styles.missingBox}>{result.missing.join("；")}</div>}<Link className={styles.projectLink} href={`/projects/${initial.projectId}`}>打开完整项目 <ChevronRight size={13}/></Link></aside>
+        <aside className={styles.evidence}><h3>AI 这次依据了什么</h3><div className={styles.evidenceRow}><span>创作方式</span><strong>{result.generationMode === "creative" ? "自由创作" : "资料驱动"}</strong></div><div className={styles.evidenceRow}><span>当前模型</span><strong>{providerDisplayName(result.provider, result.live)}</strong></div><div className={styles.evidenceRow}><span>专业技能</span><strong>{result.skills.length} 个</strong></div><div className={styles.evidenceRow}><span>已确认事实</span><strong>{result.facts.length} 条</strong></div><div className={styles.evidenceRow}><span>引用资料</span><strong>{result.sources.length} 份</strong></div><div className={styles.evidenceRow}><span>待确认</span><strong>{result.missing.length} 项</strong></div>{result.skills.length>0&&<div className={styles.skillList}>{result.skills.join(" · ")}</div>}{result.missing.length>0&&<div className={styles.missingBox}>{result.missing.join("；")}</div>}<Link className={styles.projectLink} href={`/projects/${initial.projectId}`}>打开完整项目 <ChevronRight size={13}/></Link></aside>
       </div>
     </section>}
 
-    <footer className={styles.footerLine}><span>{initial.projectName}</span><span>空白测试项目 · 仅检索你上传的资料，不联网抓取网页</span></footer>
+    <footer className={styles.footerLine}><span>{initial.projectName}</span><span>自由创作无需资料；资料驱动仅检索当前项目上传内容，不联网抓取网页</span></footer>
   </div>;
 }

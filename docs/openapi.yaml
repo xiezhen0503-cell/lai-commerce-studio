@@ -180,7 +180,7 @@ paths:
     post:
       tags: [Prompts]
       summary: 新手工作台单请求生成；适合无状态云端实例
-      description: 在同一服务端请求中完成 PromptSpec、模型运行和成果创建，避免临时 SQLite 跨实例丢失上下文。artifactType=image 时调用图片 Provider，返回带 data URI、生成参数、事实快照和来源记录的真实图片成果。
+      description: 在同一服务端请求中完成 PromptSpec、模型运行和成果创建。generationMode=creative 时无需上传资料，模型直接生成创意草稿并把具体商品事实标为待确认；generationMode=grounded 时只依据当前项目资料和确认事实。artifactType=image 时调用真实图片 Provider。
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody:
         required: true
@@ -194,6 +194,7 @@ paths:
                 objective: { type: string, maxLength: 500 }
                 task: { type: string, enum: [single, bundle] }
                 artifactType: { type: string, enum: [proposal, script, storyboard, image-prompt, image, video-storyboard, video, caption, schedule, report, prompt, handoff] }
+                generationMode: { type: string, enum: [creative, grounded], default: creative }
       responses:
         '201': { $ref: '#/components/responses/Success' }
         '200': { $ref: '#/components/responses/Success' }

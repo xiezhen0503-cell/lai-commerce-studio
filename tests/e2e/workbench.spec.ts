@@ -36,7 +36,24 @@ test("新手工作台可以从一句话生成第一版内容", async ({ page }) 
   await page.goto(accessPath);
   await expect(page.getByRole("heading", { name: /不用学提示词/ })).toBeVisible();
   await expect(page.getByLabel("当前 AI 模型")).toContainText(/Codex|免费测试模型|演示模式/);
-  await expect(page.getByLabel("AI 内容生成工作台")).toContainText("本次使用的资料");
+  await expect(page.getByLabel("AI 内容生成工作台")).toContainText(/本次使用的资料|本次创作上下文/);
+  const creativeProjectId = await createIsolatedProject(page, `无资料自由创作-${Date.now()}`);
+  const creativeResponse = await page.request.post("/api/v1/workbench/generate", {
+    data: {
+      projectId: creativeProjectId,
+      objective: "为一款东方茶饮设计小红书新品创意，不使用任何参考资料",
+      task: "single",
+      artifactType: "proposal",
+      generationMode: "creative"
+    }
+  });
+  expect(creativeResponse.status()).toBe(201);
+  const creativeJson = await creativeResponse.json();
+  expect(creativeJson.data.prompt.spec.variables.generationMode).toBe("creative");
+  expect(creativeJson.data.prompt.spec.sourceDocumentIds).toEqual([]);
+  await page.getByRole("button", { name: /自由创作/ }).click();
+  await expect(page.getByRole("button", { name: /自由创作/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText(/无需资料|具体商品事实统一标为待确认/).first()).toBeVisible();
   await page.getByRole("button", { name: /活动方案/ }).click();
   await page.getByLabel("用一句话说说你的要求").fill("为草莓燕麦杯做一份 7 天新品上市方案，价格未确认时必须留空");
   await page.getByRole("button", { name: "帮我生成第一版" }).click();
