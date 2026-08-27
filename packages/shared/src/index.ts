@@ -85,7 +85,14 @@ export function audit(action: string, summary: Record<string, unknown>, options:
 }
 
 export class CommerceService {
-  constructor(public repo = getRepository()) { seedDemoData(repo); }
+  constructor(public repo = getRepository(), options: { seedMode?: "demo" | "blank" } = {}) {
+    seedDemoData(repo);
+    const seedMode = options.seedMode ?? (process.env.LAI_SEED_MODE === "blank" ? "blank" : "demo");
+    const project = repo.get<Project>("projects", DEMO_PROJECT_ID);
+    if (seedMode === "blank" && project && !project.productIds.includes(EMPTY_TEST_PRODUCT_ID)) {
+      this.resetProjectForTesting(DEMO_PROJECT_ID);
+    }
+  }
 
   dashboard() {
     const projects = this.repo.listProjects();

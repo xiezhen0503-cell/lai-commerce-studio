@@ -12,6 +12,8 @@ services:
     envVars:
       - key: DATABASE_PATH
         value: /tmp/laicommerce.db
+      - key: LAI_SEED_MODE
+        value: blank
       - key: LAI_TEXT_PROVIDER
         value: openrouter
       - key: OPENROUTER_MODEL

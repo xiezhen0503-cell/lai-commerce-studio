@@ -57,6 +57,21 @@ describe("端到端领域工作流", () => {
     service.repo.close();
   });
 
+  it("空白启动模式在临时数据库重建时不灌入演示资料，也不会清掉用户后来上传的资料", () => {
+    const repo = new CommerceRepository(":memory:");
+    const firstStart = new CommerceService(repo, { seedMode: "blank" });
+    const initial = firstStart.getProject(DEMO_PROJECT_ID);
+    expect(initial.sources).toHaveLength(0);
+    expect(initial.facts).toHaveLength(0);
+    firstStart.saveSource({
+      id: "src_user_restart_test", workspaceId: "ws_demo", projectId: DEMO_PROJECT_ID, fileName: "用户自己的资料.md", mimeType: "text/markdown",
+      size: 32, parser: "test", status: "parsed", storagePath: "demo://user-restart-test", extractedText: "商品名称：用户自己的商品", createdAt: new Date().toISOString(), parsedAt: new Date().toISOString()
+    });
+    const restarted = new CommerceService(repo, { seedMode: "blank" });
+    expect(restarted.getProject(DEMO_PROJECT_ID).sources.map((source) => source.fileName)).toEqual(["用户自己的资料.md"]);
+    repo.close();
+  });
+
   it("Campaign Bundle 生成可追踪 Job 和多类型物料", async () => {
     const service = setup();
     const bundle = await service.createCampaignBundle(DEMO_PROJECT_ID);
