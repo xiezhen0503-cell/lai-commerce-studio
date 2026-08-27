@@ -51,6 +51,9 @@ describe("成果类型化下载", () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg"><text>主图预览</text></svg>';
     const image = await buildArtifactExport(input("image", JSON.stringify({ assetUri: `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}` })), "svg");
     expect(image.bytes.toString("utf8")).toContain("<svg");
+    const original = await buildArtifactExport(input("image", JSON.stringify({ assetUri: `data:image/png;base64,${Buffer.from([137,80,78,71]).toString("base64")}` })), "original");
+    expect(original).toMatchObject({ contentType: "image/png", extension: "png", format: "original" });
+    expect(artifactExportFormats("image")).toContain("original");
 
     const video = await buildArtifactExport(input("video", JSON.stringify({ template: "Promo30", props: { product: "燕麦杯", specification: "50克×6杯" } })), "zip");
     const archive = await JSZip.loadAsync(video.bytes);

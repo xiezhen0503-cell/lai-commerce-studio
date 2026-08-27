@@ -2,7 +2,7 @@ import { Document, HeadingLevel, Packer, Paragraph } from "docx";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
 
-export type ArtifactExportFormat = "md" | "txt" | "html" | "json" | "csv" | "xlsx" | "docx" | "svg" | "zip";
+export type ArtifactExportFormat = "md" | "txt" | "html" | "json" | "csv" | "xlsx" | "docx" | "original" | "svg" | "zip";
 
 type ArtifactRecord = {
   id: string;
@@ -35,7 +35,7 @@ const TEXT_TYPES = new Set(["proposal", "script", "image-prompt", "caption", "re
 const STRUCTURED_TYPES = new Set(["storyboard", "video-storyboard", "schedule", "handoff"]);
 
 export function artifactExportFormats(type: string): ArtifactExportFormat[] {
-  if (type === "image") return ["svg", "json"];
+  if (type === "image") return ["original", "json", "svg"];
   if (type === "video") return ["zip", "json", "html"];
   if (STRUCTURED_TYPES.has(type)) return ["json", "xlsx", "csv", "docx"];
   if (TEXT_TYPES.has(type)) return ["md", "docx", "html", "txt", "json"];
@@ -163,6 +163,16 @@ function imageSvg(input: ArtifactExportInput) {
   return Buffer.from(match[1], "base64");
 }
 
+function originalImage(input: ArtifactExportInput): ArtifactExportFile {
+  const parsed = safeJson(input.version.content) as { assetUri?: unknown } | undefined;
+  const uri = typeof parsed?.assetUri === "string" ? parsed.assetUri : "";
+  const match = uri.match(/^data:(image\/(?:png|jpe?g|webp|svg\+xml));(?:charset=[^;,]+;)?base64,(.+)$/i);
+  if (!match?.[1] || !match[2]) throw new Error("这张图片没有可下载的原图资产，请改用 JSON 导出查看生成记录");
+  const mimeType = match[1].toLowerCase();
+  const extension = mimeType === "image/jpeg" || mimeType === "image/jpg" ? "jpg" : mimeType === "image/svg+xml" ? "svg" : mimeType.split("/")[1]!;
+  return { bytes: Buffer.from(match[2], "base64"), contentType: mimeType, extension, format: "original" };
+}
+
 function videoPreviewHtml(input: ArtifactExportInput) {
   const parsed = (safeJson(input.version.content) ?? {}) as { template?: string; props?: { product?: string; specification?: string; factSnapshotId?: string } };
   const product = escapeHtml(parsed.props?.product || "商品视频草稿");
@@ -182,6 +192,7 @@ export async function buildArtifactExport(input: ArtifactExportInput, requested?
   const formats = artifactExportFormats(input.artifact.type);
   const format = (requested || defaultArtifactExportFormat(input.artifact.type)) as ArtifactExportFormat;
   if (!formats.includes(format)) throw new Error(`成果类型 ${input.artifact.type} 不支持 ${format} 导出；可用格式：${formats.join("、")}`);
+  if (format === "original") return originalImage(input);
   if (format === "svg") return { bytes: imageSvg(input), contentType: "image/svg+xml; charset=utf-8", extension: "svg", format };
   if (format === "zip") return { bytes: await videoZip(input), contentType: "application/zip", extension: "zip", format };
   if (format === "docx") return { bytes: await docxDocument(input), contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", extension: "docx", format };

@@ -23,6 +23,7 @@ const COMMERCE_INSTRUCTIONS = `你是 LaiCommerce Studio 的中文电商内容�
 type OpenAIReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 type TextProviderMode = "auto" | "openai" | "openrouter" | "mock";
 type ActiveTextProvider = Exclude<TextProviderMode, "auto">;
+type ImageProviderMode = "auto" | "pollinations" | "deterministic";
 
 type OpenAIResponsePayload = {
   model?: string;
@@ -37,6 +38,11 @@ type OpenRouterResponsePayload = {
   error?: { message?: string } | null;
   choices?: Array<{ message?: { content?: string | Array<{ type?: string; text?: string }> } }>;
   usage?: { total_tokens?: number } | null;
+};
+
+type PollinationsImagePayload = {
+  data?: Array<{ b64_json?: string; media_type?: string }>;
+  error?: { message?: string } | string | null;
 };
 
 const MAX_EXTRACTED_CHARACTERS = 250_000;
@@ -154,6 +160,25 @@ function openAIConfigured() {
 
 function openRouterConfigured() {
   return Boolean(process.env.OPENROUTER_API_KEY?.trim());
+}
+
+function imageProviderMode(): ImageProviderMode {
+  const value = process.env.LAI_IMAGE_PROVIDER?.trim().toLowerCase();
+  return value === "pollinations" || value === "deterministic" ? value : "auto";
+}
+
+function pollinationsModel() {
+  return process.env.POLLINATIONS_IMAGE_MODEL?.trim() || "zimage";
+}
+
+function pollinationsReferenceModel() {
+  return process.env.POLLINATIONS_REFERENCE_IMAGE_MODEL?.trim() || "klein";
+}
+
+function activeImageProvider() {
+  const mode = imageProviderMode();
+  if (mode !== "auto") return mode;
+  return process.env.POLLINATIONS_API_KEY?.trim() ? "pollinations" : "deterministic";
 }
 
 function activeTextProvider(): ActiveTextProvider {
@@ -401,6 +426,120 @@ export class DeterministicStoryboardImageProvider implements ImageGenerationProv
   }
 }
 
+export class PollinationsImageProvider implements ImageGenerationProvider {
+  name = "pollinations-image";
+  configured = true;
+
+  async generate(input: { prompt: string; width: number; height: number; referenceImages?: Array<{ dataUri: string }> }) {
+    const apiKey = process.env.POLLINATIONS_API_KEY?.trim();
+    const referenceImages = apiKey ? input.referenceImages ?? [] : [];
+    const model = referenceImages.length ? pollinationsReferenceModel() : pollinationsModel();
+    const url = new URL(`https://gen.pollinations.ai/image/${encodeURIComponent(input.prompt.slice(0, 6_000))}`);
+    url.searchParams.set("model", model);
+    url.searchParams.set("width", String(input.width));
+    url.searchParams.set("height", String(input.height));
+    url.searchParams.set("safe", "true");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120_000);
+    try {
+      const response = apiKey
+        ? await fetch("https://gen.pollinations.ai/v1/images/generations", {
+            method: "POST",
+            headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify({
+              prompt: input.prompt,
+              model,
+              n: 1,
+              size: `${input.width}x${input.height}`,
+              quality: "medium",
+              response_format: "b64_json",
+              safe: true,
+              ...(referenceImages.length ? { image: referenceImages.map((item) => item.dataUri) } : {})
+            }),
+            signal: controller.signal
+          })
+        : await fetch(url, { signal: controller.signal });
+      if (!response.ok) {
+        const detail = (await response.text().catch(() => "")).slice(0, 240).trim();
+        if (response.status === 401 || response.status === 403) throw new Error("免费生图服务的测试凭证无效或已过期，请管理员重新配置。");
+        if (response.status === 402) throw new Error("免费生图额度暂时用完了，请稍后再试。");
+        if (response.status === 429) throw new Error("免费生图服务当前排队人数较多，请稍后再试。");
+        throw new Error(`免费生图服务调用失败（${response.status}）${detail ? `：${detail}` : "，请稍后重试"}`);
+      }
+
+      const contentType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() || "";
+      let mimeType = contentType;
+      let bytes: Uint8Array;
+      if (contentType === "application/json") {
+        const payload = await response.json().catch(() => ({})) as PollinationsImagePayload;
+        const encoded = payload.data?.[0]?.b64_json;
+        if (!encoded) {
+          const detail = typeof payload.error === "string" ? payload.error : payload.error?.message;
+          throw new Error(detail?.trim() || "免费生图服务没有返回图片文件，请稍后重试。");
+        }
+        mimeType = payload.data?.[0]?.media_type?.trim().toLowerCase() || "image/png";
+        bytes = new Uint8Array(Buffer.from(encoded, "base64"));
+      } else {
+        if (!contentType.startsWith("image/")) throw new Error("免费生图服务没有返回图片文件，请稍后重试。");
+        bytes = new Uint8Array(await response.arrayBuffer());
+      }
+      if (!bytes.byteLength) throw new Error("免费生图服务返回了空图片，请稍后重试。");
+      if (bytes.byteLength > 15 * 1024 * 1024) throw new Error("免费生图服务返回的图片超过 15MB，无法保存。");
+      return {
+        assetUri: `data:${mimeType};base64,${Buffer.from(bytes).toString("base64")}`,
+        metadata: {
+          provider: this.name,
+          service: "Pollinations",
+          model,
+          mimeType,
+          width: input.width,
+          height: input.height,
+          externalGeneration: true,
+          authenticated: Boolean(apiKey),
+          referenceImageCount: referenceImages.length
+        }
+      };
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw new Error("免费生图服务响应超时，请稍后重试。");
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+export class RoutedImageProvider implements ImageGenerationProvider {
+  private active() {
+    return activeImageProvider() === "pollinations" ? new PollinationsImageProvider() : new DeterministicStoryboardImageProvider();
+  }
+  get name() { return this.active().name; }
+  get configured() { return this.active().configured; }
+  generate(input: { prompt: string; width: number; height: number; referenceImages?: Array<{ dataUri: string }> }) { return this.active().generate(input); }
+}
+
+export function getImageProviderStatus() {
+  const active = activeImageProvider();
+  if (active === "pollinations") return {
+    mode: "pollinations" as const,
+    provider: "pollinations-image",
+    model: pollinationsModel(),
+    configured: true,
+    live: true,
+    externalGeneration: true,
+    authenticated: Boolean(process.env.POLLINATIONS_API_KEY?.trim())
+  };
+  return {
+    mode: "deterministic" as const,
+    provider: "deterministic-storyboard-svg-v1",
+    model: "deterministic-storyboard-svg-v1",
+    configured: true,
+    live: false,
+    externalGeneration: false,
+    authenticated: false
+  };
+}
+
 export class MockImageProvider extends DeterministicStoryboardImageProvider { name = "mock-image-v1"; }
 
 export class MockVideoProvider implements VideoRenderProvider {
@@ -445,7 +584,7 @@ export class PromptfooAdapter extends ExternalProviderAdapter { constructor() { 
 export class LangfuseAdapter extends ExternalProviderAdapter { constructor() { super("Langfuse", undefined, Boolean(process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY)); } }
 
 export const providerRegistry = {
-  text: new RoutedTextProvider(), image: new DeterministicStoryboardImageProvider(), document: new LocalDocumentParser(), voice: new MockVoiceProvider(), video: new MockVideoProvider(),
+  text: new RoutedTextProvider(), image: new RoutedImageProvider(), document: new LocalDocumentParser(), voice: new MockVoiceProvider(), video: new MockVideoProvider(),
   openai: new OpenAIAdapter(), openrouter: new OpenRouterAdapter(), anthropic: new AnthropicAdapter(), gemini: new GeminiAdapter(), docling: new DoclingAdapter(), dify: new DifyAdapter(),
   ragflow: new RAGFlowAdapter(), comfyui: new ComfyUIAdapter(), n8n: new N8nWebhookAdapter(), langfuse: new LangfuseAdapter(),
   promptfoo: new PromptfooAdapter(), remotion: new RemotionAdapter()

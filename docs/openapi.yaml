@@ -180,7 +180,7 @@ paths:
     post:
       tags: [Prompts]
       summary: 新手工作台单请求生成；适合无状态云端实例
-      description: 在同一服务端请求中完成 PromptSpec、模型运行和成果创建，避免临时 SQLite 跨实例丢失上下文。
+      description: 在同一服务端请求中完成 PromptSpec、模型运行和成果创建，避免临时 SQLite 跨实例丢失上下文。artifactType=image 时调用图片 Provider，返回带 data URI、生成参数、事实快照和来源记录的真实图片成果。
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody:
         required: true
@@ -193,12 +193,13 @@ paths:
                 projectId: { type: string }
                 objective: { type: string, maxLength: 500 }
                 task: { type: string, enum: [single, bundle] }
-                artifactType: { type: string }
+                artifactType: { type: string, enum: [proposal, script, storyboard, image-prompt, image, video-storyboard, video, caption, schedule, report, prompt, handoff] }
       responses:
         '201': { $ref: '#/components/responses/Success' }
         '200': { $ref: '#/components/responses/Success' }
         '400': { $ref: '#/components/responses/Error' }
         '401': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
   /api/v1/prompts/run:
     post:
       tags: [Prompts]

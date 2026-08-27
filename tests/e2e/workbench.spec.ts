@@ -46,6 +46,12 @@ test("新手工作台可以从一句话生成第一版内容", async ({ page }) 
   await expect(page.getByRole("link", { name: "下载结果" })).toBeVisible();
   await expect(page.getByRole("button", { name: "复制结果" })).toBeVisible();
 
+  await page.getByRole("button", { name: /AI 商品图/ }).click();
+  await page.getByLabel("用一句话说说你的要求").fill("生成一张方形商品主图，不要编造价格、规格和功效文字");
+  await page.getByRole("button", { name: "帮我生成第一版" }).click();
+  await expect(page.getByRole("img", { name: "AI 生成的商品主图草稿" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "下载原图" })).toBeVisible();
+
   await page.getByRole("link", { name: /进入专业模式/ }).click();
   await expect(page.getByRole("heading", { name: "先选业务任务，不从空白提示词开始" })).toBeVisible();
   await page.getByPlaceholder("例如：给这款燕麦杯写一个30秒短视频脚本").fill("为草莓燕麦杯生成30秒短视频脚本，价格未确认时必须留空");
@@ -147,7 +153,7 @@ test("商业 Demo 的资料、事实、版本、图片、视频、审核和导�
   expect((await xlsxResponse.body()).subarray(0, 2).toString()).toBe("PK");
 
   const imageRow = page.locator("li.list-item").filter({ hasText: "主图预览" }).first();
-  const svgResponse = await page.request.get((await imageRow.getByRole("link", { name: "SVG", exact: true }).getAttribute("href"))!);
+  const svgResponse = await page.request.get((await imageRow.getByRole("link", { name: "原图", exact: true }).getAttribute("href"))!);
   expect(svgResponse.headers()["content-type"]).toContain("image/svg+xml");
   expect(await svgResponse.text()).toContain("<svg");
 

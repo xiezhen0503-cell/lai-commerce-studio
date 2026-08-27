@@ -24,7 +24,7 @@ type WorkbenchResponse = {
       explanation: { sources: string[]; confirmedFacts: string[]; missing: string[] };
     };
     result?: {
-      artifact: { id: string; title: string; version: { content: string } };
+      artifact: { id: string; type: string; title: string; version: { content: string } };
       run: { provider: string; model: string };
     };
     bundle?: { artifactIds?: string[]; provider?: string; model?: string };
@@ -44,19 +44,44 @@ type Result = {
   provider: string;
   model: string;
   live: boolean;
+  image?: {
+    assetUri: string;
+    prompt: string;
+    warnings: string[];
+    referenceSourceId?: string;
+  };
 };
 
 const taskOptions = [
   { id: "plan", label: "活动方案", description: "目标、策略与 7 天动作", icon: FileText, artifactType: "proposal", example: "帮我做一份新品上市方案，要写清目标人群、内容方向和未来 7 天怎么执行" },
   { id: "script", label: "短视频脚本", description: "画面、口播与字幕", icon: Film, artifactType: "script", example: "写一条 30 秒短视频脚本，开头要抓人，但不要夸大商品功效" },
-  { id: "image", label: "商品主图", description: "五张图的内容规划", icon: ImageIcon, artifactType: "storyboard", example: "规划 5 张商品主图，分别讲清使用场景、配料、规格和购买理由" },
+  { id: "image", label: "AI 商品图", description: "真实生成 · 可预览下载", icon: ImageIcon, artifactType: "image", example: "生成 1 张方形商品主图，画面干净有质感，适合电商首图，不要在图片里编造价格和功效文字" },
   { id: "video", label: "视频分镜", description: "镜头、动作与节奏", icon: Layers3, artifactType: "video-storyboard", example: "做一条 30 秒商品视频分镜，适合手机竖屏观看，价格先留空" },
   { id: "bundle", label: "整套活动", description: "方案到视频一次整理", icon: Sparkles, artifactType: "proposal", example: "为这个商品生成一整套新品上市内容，包含方案、脚本、主图、视频和排期" }
 ] as const;
 
 function providerDisplayName(provider: string, live: boolean) {
   if (!live) return "演示模式";
+  if (provider === "pollinations-image") return "免费生图模型";
   return provider === "openrouter-free" ? "免费测试模型" : "Codex";
+}
+
+function imageResult(content: string) {
+  try {
+    const parsed = JSON.parse(content) as {
+      assetUri?: unknown;
+      production?: { prompt?: unknown; warnings?: unknown; referenceSourceId?: unknown };
+    };
+    if (typeof parsed.assetUri !== "string" || !parsed.assetUri.startsWith("data:image/")) return undefined;
+    return {
+      assetUri: parsed.assetUri,
+      prompt: typeof parsed.production?.prompt === "string" ? parsed.production.prompt : "",
+      warnings: Array.isArray(parsed.production?.warnings) ? parsed.production.warnings.filter((item): item is string => typeof item === "string") : [],
+      referenceSourceId: typeof parsed.production?.referenceSourceId === "string" ? parsed.production.referenceSourceId : undefined
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 function providerHint(mode: InitialContext["ai"]["mode"]) {
@@ -136,7 +161,7 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
     if (!ready) return;
     setError(""); setResult(undefined); setCopied(false);
     const fullObjective = `${objective.trim()}\n目标平台：${platforms.join("、")}`;
-    setStage(taskId === "bundle" ? "正在生成整套内容" : "正在核对事实并生成");
+    setStage(taskId === "bundle" ? "正在生成整套内容" : taskId === "image" ? "正在生成真实图片，可能需要 1 分钟" : "正在核对事实并生成");
     const response = await fetch("/api/v1/workbench/generate",{method:"POST",headers:{"content-type":"application/json","idempotency-key":`beginner-${Date.now()}`},body:JSON.stringify({projectId:initial.projectId,objective:fullObjective,task:taskId === "bundle" ? "bundle" : "single",artifactType:selectedTask.artifactType})});
     const json = await response.json() as WorkbenchResponse;
     setStage("");
@@ -149,7 +174,8 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
     } else {
       const generated = json.data.result;
       if (!generated) { setError("内容没有生成成功，请再试一次"); return; }
-      setResult({title:generated.artifact.title,content:generated.artifact.version.content,score:prompt.evaluation.total,sources:prompt.explanation.sources,facts:prompt.explanation.confirmedFacts,missing:prompt.explanation.missing,artifactId:generated.artifact.id,provider:generated.run.provider,model:generated.run.model,live:generated.run.model!=="mock-text-v1"});
+      const image = generated.artifact.type === "image" ? imageResult(generated.artifact.version.content) : undefined;
+      setResult({title:generated.artifact.title,content:generated.artifact.version.content,score:prompt.evaluation.total,sources:prompt.explanation.sources,facts:prompt.explanation.confirmedFacts,missing:prompt.explanation.missing,artifactId:generated.artifact.id,provider:generated.run.provider,model:generated.run.model,live:generated.run.model!=="mock-text-v1"&&generated.run.model!=="deterministic-storyboard-svg-v1",image});
     }
     setTimeout(() => resultRef.current?.scrollIntoView({behavior:"smooth",block:"start"}),50);
   }
@@ -216,9 +242,9 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
     </section>
 
     {result && <section className={styles.result} ref={resultRef} aria-live="polite">
-      <div className={styles.resultHead}><div><div className={styles.resultEyebrow}><Check size={13}/> 第一版已完成</div><h2>{result.title}</h2><p>{result.bundleCount ? `共整理 ${result.bundleCount} 项内容，已放入当前项目。` : "你可以直接复制，也可以进入完整工作台继续修改。"}</p></div><div className={styles.score}><strong>{result.score}</strong><span>任务完整度</span></div></div>
+      <div className={styles.resultHead}><div><div className={styles.resultEyebrow}><Check size={13}/> 第一版已完成</div><h2>{result.title}</h2><p>{result.bundleCount ? `共整理 ${result.bundleCount} 项内容，已放入当前项目。` : result.image ? "这是真实图片模型返回的图片草稿，可直接预览和下载原图。" : "你可以直接复制，也可以进入完整工作台继续修改。"}</p></div><div className={styles.score}><strong>{result.score}</strong><span>任务完整度</span></div></div>
       <div className={styles.resultBody}>
-        <article className={styles.output}><div className={styles.outputToolbar}><div className={styles.outputIdentity}><span>{selectedTask.label}</span><small><Bot size={12}/>{providerDisplayName(result.provider, result.live)} · {result.model}</small></div><div className={styles.outputActions}><a className={styles.downloadLink} href={result.artifactId?`/api/v1/artifacts/${result.artifactId}/export`:`/api/v1/projects/${initial.projectId}/export`}><Download size={13}/>{result.bundleCount?"下载全部":"下载结果"}</a><button type="button" onClick={copyResult}><Clipboard size={13}/>{copied?"已复制":"复制结果"}</button></div></div><pre>{result.content}</pre></article>
+        <article className={styles.output}><div className={styles.outputToolbar}><div className={styles.outputIdentity}><span>{selectedTask.label}</span><small><Bot size={12}/>{providerDisplayName(result.provider, result.live)} · {result.model}</small></div><div className={styles.outputActions}><a className={styles.downloadLink} href={result.artifactId?`/api/v1/artifacts/${result.artifactId}/export`:`/api/v1/projects/${initial.projectId}/export`}><Download size={13}/>{result.bundleCount?"下载全部":result.image?"下载原图":"下载结果"}</a>{!result.image&&<button type="button" onClick={copyResult}><Clipboard size={13}/>{copied?"已复制":"复制结果"}</button>}</div></div>{result.image?<div className={styles.generatedImage}><img src={result.image.assetUri} alt="AI 生成的商品主图草稿"/><div className={styles.imageNotes}>{result.image.warnings.map((warning)=><p key={warning}><ShieldCheck size={13}/>{warning}</p>)}<details><summary>查看本次图片提示词</summary><pre>{result.image.prompt}</pre></details></div></div>:<pre>{result.content}</pre>}</article>
         <aside className={styles.evidence}><h3>AI 这次依据了什么</h3><div className={styles.evidenceRow}><span>当前模型</span><strong>{providerDisplayName(result.provider, result.live)}</strong></div><div className={styles.evidenceRow}><span>已确认事实</span><strong>{result.facts.length} 条</strong></div><div className={styles.evidenceRow}><span>引用资料</span><strong>{result.sources.length} 份</strong></div><div className={styles.evidenceRow}><span>待确认</span><strong>{result.missing.length} 项</strong></div>{result.missing.length>0&&<div className={styles.missingBox}>{result.missing.join("；")}</div>}<Link className={styles.projectLink} href={`/projects/${initial.projectId}`}>打开完整项目 <ChevronRight size={13}/></Link></aside>
       </div>
     </section>}

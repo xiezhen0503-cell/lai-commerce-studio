@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { authorize, defaultAgentPrincipal } from "@lai/permissions";
-import { getTextProviderStatus, MockImageProvider, MockTextProvider, MockVideoProvider, MockVoiceProvider, OpenAIResponsesTextProvider, OpenRouterFreeTextProvider, RoutedTextProvider } from "@lai/providers";
+import { getImageProviderStatus, getTextProviderStatus, MockImageProvider, MockTextProvider, MockVideoProvider, MockVoiceProvider, OpenAIResponsesTextProvider, OpenRouterFreeTextProvider, PollinationsImageProvider, RoutedTextProvider } from "@lai/providers";
 import { detectPromptInjection, redact, safeWorkspacePath, signWebhook, validateOutboundUrl, validateUpload, verifyWebhook } from "@lai/security";
 import { CommerceRepository } from "@lai/database";
 import { CommerceService, DEMO_PROJECT_ID } from "@lai/shared";
@@ -117,6 +117,34 @@ describe("安全、权限和 Provider", () => {
     expect(getTextProviderStatus()).toMatchObject({ mode: "openrouter", provider: "openrouter-free", model: "openrouter/free", live: true });
     expect(generated).toMatchObject({ text: "免费模型测试结果", model: "qwen/qwen3.6-27b:free", tokenUsage: 88 });
     service.repo.close();
+  });
+
+  it("通过 Pollinations 免费额度生成真实图片并带上商品参考图", async () => {
+    vi.stubEnv("LAI_IMAGE_PROVIDER", "pollinations");
+    vi.stubEnv("POLLINATIONS_API_KEY", "sk-test-image-only");
+    vi.stubEnv("POLLINATIONS_IMAGE_MODEL", "zimage");
+    vi.stubEnv("POLLINATIONS_REFERENCE_IMAGE_MODEL", "klein");
+    const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
+      data: [{ b64_json: png.toString("base64"), media_type: "image/png" }]
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const generated = await new PollinationsImageProvider().generate({
+      prompt: "方形商品摄影草稿",
+      width: 1024,
+      height: 1024,
+      referenceImages: [{ dataUri: "data:image/png;base64,iVBORw0KGgo=" }]
+    });
+    const request = fetchMock.mock.calls[0]?.[1];
+    const body = JSON.parse(String(request?.body));
+
+    expect(fetchMock).toHaveBeenCalledWith("https://gen.pollinations.ai/v1/images/generations", expect.objectContaining({ method: "POST" }));
+    expect(new Headers(request?.headers).get("authorization")).toBe("Bearer sk-test-image-only");
+    expect(body).toMatchObject({ model: "klein", size: "1024x1024", response_format: "b64_json", image: ["data:image/png;base64,iVBORw0KGgo="] });
+    expect(generated.assetUri).toBe(`data:image/png;base64,${png.toString("base64")}`);
+    expect(generated.metadata).toMatchObject({ externalGeneration: true, referenceImageCount: 1 });
+    expect(getImageProviderStatus()).toMatchObject({ mode: "pollinations", live: true, model: "zimage" });
   });
 
   it("用专属链接 Token 保护公开工作台，但本地默认不阻断", () => {

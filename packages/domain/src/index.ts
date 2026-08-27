@@ -146,7 +146,7 @@ export interface TextGenerationProvider { name: string; configured: boolean; gen
 export interface EmbeddingProvider { name: string; configured: boolean; embed(texts: string[]): Promise<{ vectors: number[][]; model: string }> }
 export interface DocumentParserProvider { name: string; configured: boolean; parse(input: { fileName: string; mimeType: string; bytes: Uint8Array }): Promise<{ text: string; markdown: string; warnings: string[] }> }
 export interface KnowledgeRetrievalProvider { name: string; configured: boolean; search(query: string, options?: { projectId?: string; limit?: number }): Promise<Array<{ uri: string; text: string; score: number }>> }
-export interface ImageGenerationProvider { name: string; configured: boolean; generate(input: { prompt: string; width: number; height: number }): Promise<{ assetUri: string; metadata: Record<string, unknown> }> }
+export interface ImageGenerationProvider { name: string; configured: boolean; generate(input: { prompt: string; width: number; height: number; referenceImages?: Array<{ dataUri: string }> }): Promise<{ assetUri: string; metadata: Record<string, unknown> }> }
 export interface ImageCompositionProvider { name: string; configured: boolean; compose(input: { layers: Array<{ uri?: string; text?: string; x: number; y: number }>; width: number; height: number }): Promise<{ assetUri: string }> }
 export interface VoiceProvider { name: string; configured: boolean; synthesize(input: { text: string; voice?: string; format?: "mp3" | "wav" }): Promise<{ audioUri: string; durationMs: number }> }
 export interface VideoGenerationProvider { name: string; configured: boolean; generate(input: { prompt: string; durationSeconds: number; aspectRatio: string }): Promise<{ previewUri: string; jobId?: string }> }

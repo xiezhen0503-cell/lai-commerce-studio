@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import fs from "node:fs/promises";
 import type { AgentHandoff, Artifact, ArtifactVersion, BrandProfile, CampaignBundleResult, Fact, FactSnapshot, GenerationJob, Product, Project, PromptGenerationResult, PromptSpec, Scope, SourceDocument } from "@lai/domain";
 import { AgentHandoffSchema, ArtifactTypeSchema as ArtifactTypeValidator, FactSchema, ProjectSchema, PromptSpecSchema, newId, nowIso } from "@lai/domain";
 import { getRepository, type CommerceRepository } from "@lai/database";
@@ -21,6 +22,40 @@ export class CommerceError extends Error {
 }
 
 const checksumFacts = (facts: Fact[]) => crypto.createHash("sha256").update(JSON.stringify(facts.map((fact) => ({ id: fact.id, value: fact.value, status: fact.status, updatedAt: fact.updatedAt })))).digest("hex");
+
+function buildGroundedImagePrompt(context: CompileContext, referenceImageUsed: boolean) {
+  const product = context.products[0]!;
+  const confirmedFacts = context.snapshot.facts
+    .filter((fact) => ["verified", "user-confirmed"].includes(fact.status) && fact.value)
+    .slice(0, 12)
+    .map((fact) => `${fact.type}: ${fact.value}${fact.unit ? ` ${fact.unit}` : ""}`);
+  const visualReferenceRule = referenceImageUsed
+    ? "Use the supplied product photo as the visual reference. Preserve the product shape, package proportions, colors, logo placement and visible label layout. Do not replace or redesign the product."
+    : "No usable product photo was supplied. Create a clearly generic packaging concept for a creative draft; do not invent a real trademark, certification mark, label copy or exact package detail.";
+  const prompt = `Create one square Chinese ecommerce hero image as a commercial creative draft.
+
+USER OBJECTIVE
+${context.spec.objective}
+
+PRODUCT CONTEXT
+Brand: ${context.brand.name}
+Product: ${product.name}
+Target platforms: ${context.spec.targetPlatforms.join(", ")}
+Audience: ${context.spec.targetAudience}
+Confirmed facts only:
+${confirmedFacts.length ? confirmedFacts.map((item) => `- ${item}`).join("\n") : "- No confirmed product facts; keep all concrete package details generic."}
+
+VISUAL DIRECTION
+- Photorealistic commercial product photography, clean composition, believable lighting, clear focal product, generous safe space for later deterministic Chinese typography.
+- Follow this user request and the confirmed facts. Treat any missing fact as missing.
+- ${visualReferenceRule}
+- Do not render price, discount, sales figures, ingredients, specifications, dates, certifications, medical effects, nutrition claims, or other factual Chinese copy inside the image.
+- No watermark, no platform logo, no illegible pseudo-text, no duplicated package, no deformed container, no extra fingers or hands.
+- Avoid these claims or expressions: ${[...context.brand.bannedWords, ...product.prohibitedClaims].join(", ") || "none"}.
+
+Return the image only.`;
+  return { prompt, confirmedFacts };
+}
 
 const PROJECT_TEMPLATE = {
   type: "新品上市", businessGoal: "验证新品内容钩子与首购转化", targetPlatforms: ["小红书", "抖音"], targetAudience: "25–38 岁、重视配料与便携早餐的城市上班族", objective: "为新品上市生成一套有事实依据、可执行、可复核的内容方案"
@@ -306,6 +341,7 @@ export class CommerceService {
     const spec = this.repo.get<PromptSpec>("prompt_specs", promptSpecId);
     if (!spec || spec.projectId !== projectId) throw new CommerceError("PROMPT_NOT_FOUND", "没有找到这个项目的提示词", 404);
     const context = this.makeCompileContext(projectId, spec.objective); context.spec = spec;
+    if (artifactType === "image") return this.runImagePrompt(projectId, promptSpecId, context);
     const prompt = compilePrompt(context, "markdown");
     const started = Date.now();
     const textProvider = providerRegistry.text;
@@ -321,7 +357,57 @@ export class CommerceService {
     return { artifact, run };
   }
 
-  titleForArtifact(type: z.infer<typeof ArtifactTypeValidator>) { return ({ proposal: "新品上市方案", script: "30秒短视频脚本", storyboard: "五张主图 Storyboard", "image-prompt": "图片生成提示词", image: "模拟主图", "video-storyboard": "30秒视频分镜", video: "Remotion 视频草稿", caption: "平台文案", schedule: "内容排期", report: "质量报告", prompt: "专业提示词", handoff: "智能体交接包" } as Record<string, string>)[type] || type; }
+  async runImagePrompt(projectId: string, promptSpecId: string, context: CompileContext) {
+    const started = Date.now();
+    const imageSource = this.getProject(projectId).sources.find((source) => source.status === "parsed" && ["image/jpeg", "image/png"].includes(source.mimeType) && !source.storagePath.includes("://"));
+    const referenceImages: Array<{ dataUri: string }> = [];
+    const canUseReferenceImage = providerRegistry.image.name === "pollinations-image" && Boolean(process.env.POLLINATIONS_API_KEY?.trim());
+    if (imageSource && canUseReferenceImage) {
+      try {
+        const bytes = await fs.readFile(imageSource.storagePath);
+        if (bytes.byteLength <= 10 * 1024 * 1024) referenceImages.push({ dataUri: `data:${imageSource.mimeType};base64,${bytes.toString("base64")}` });
+      } catch {
+        // The source record remains valid even if an ephemeral cloud upload disappeared; generation can continue without a visual reference.
+      }
+    }
+    const production = buildGroundedImagePrompt(context, referenceImages.length > 0);
+    let generated;
+    try {
+      generated = await providerRegistry.image.generate({ prompt: production.prompt, width: 1024, height: 1024, referenceImages });
+    } catch (error) {
+      throw new CommerceError("IMAGE_GENERATION_FAILED", error instanceof Error ? error.message : "图片没有生成成功，请稍后重试。", 503);
+    }
+    const generationMetadata = generated.metadata as Record<string, unknown>;
+    const model = typeof generationMetadata.model === "string" ? generationMetadata.model : providerRegistry.image.name;
+    const content = JSON.stringify({
+      assetUri: generated.assetUri,
+      metadata: generated.metadata,
+      production: {
+        prompt: production.prompt,
+        userObjective: context.spec.objective,
+        sourceDocumentIds: context.spec.sourceDocumentIds,
+        sourceNames: context.sourceNames,
+        confirmedFacts: production.confirmedFacts,
+        factSnapshotId: context.snapshot.id,
+        referenceSourceId: referenceImages.length ? imageSource?.id : undefined,
+        warnings: referenceImages.length
+          ? ["已使用本项目上传的商品照片作为视觉参考；生成结果仍需人工对照包装与文字。", "价格、规格、活动和功效文字未交给图片模型渲染。"]
+          : ["没有找到可用的商品照片，本次是通用包装创意草稿，商品外观可能与实物不一致。", "价格、规格、活动和功效文字未交给图片模型渲染。"]
+      }
+    });
+    const artifact = this.createArtifact(projectId, "image", "AI 商品主图", content, context.snapshot.id, promptSpecId, { type: "platform-ai", id: providerRegistry.image.name });
+    const run = {
+      id: newId("run"), promptVersionId: promptSpecId, provider: providerRegistry.image.name, model,
+      inputSnapshot: context.snapshot.id, factSnapshotId: context.snapshot.id,
+      output: `已生成 1 张 1024×1024 图片，成果：${artifact.id}`, latency: Date.now() - started,
+      tokenUsage: 0, estimatedCost: 0, qualityScore: evaluatePrompt(context.spec, context.snapshot).total,
+      errors: [], createdAt: nowIso(), updatedAt: nowIso()
+    };
+    this.repo.save("prompt_runs", run, { workspaceId: DEMO_WORKSPACE_ID, projectId, parentId: promptSpecId });
+    return { artifact, run };
+  }
+
+  titleForArtifact(type: z.infer<typeof ArtifactTypeValidator>) { return ({ proposal: "新品上市方案", script: "30秒短视频脚本", storyboard: "五张主图 Storyboard", "image-prompt": "图片生成提示词", image: "AI 商品主图", "video-storyboard": "30秒视频分镜", video: "Remotion 视频草稿", caption: "平台文案", schedule: "内容排期", report: "质量报告", prompt: "专业提示词", handoff: "智能体交接包" } as Record<string, string>)[type] || type; }
 
   mockScript(context: CompileContext) {
     const product = context.products[0]!;
