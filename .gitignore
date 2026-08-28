@@ -1,5 +1,6 @@
 node_modules/
 .next/
+apps/web/public/fonts/NotoSansSC-400.ttf
 dist/
 coverage/
 playwright-report/

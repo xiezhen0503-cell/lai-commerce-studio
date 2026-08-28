@@ -82,12 +82,12 @@ pnpm build
 |---|---|---|
 | 项目、品牌、商品、资料上传、事实/快照、PromptSpec、物料版本、任务、审核、权限与审计 | 已真实实现，本地 SQLite 持久化 | 无 |
 | Web、REST、MCP Streamable HTTP、A2A 1.0、SSE、HMAC Webhook 示例 | 代码与本地运行态测试已真实实现；当前 Render 公网只开放 Web / REST | MCP、A2A 需配置独立公网服务地址 |
-| 中文文案生成 | OpenAI Responses API、OpenRouter 与 Pollinations Quest 文本模型均已实现；生产真实模式禁止回退 Mock | 公网免费测试用 `POLLINATIONS_TEXT_API_KEY`；Codex 用 `OPENAI_API_KEY` |
+| 中文文案生成 | OpenAI Responses API、OpenRouter 与 Pollinations Quest 文本模型均已实现；方案与脚本在保存前执行结构、长度、指标、排期和可执行性质量门，失败自动重写一次，生产真实模式禁止回退 Mock | 公网免费测试用 `POLLINATIONS_TEXT_API_KEY`；Codex 用 `OPENAI_API_KEY` |
 | 文档解析 | TXT/MD/CSV、PDF 文本层、DOCX、PPTX、XLSX 为服务端真实解析；图片在 OpenRouter 已配置时走视觉识别 | Office/PDF 无需 Key；图片识别使用 `OPENROUTER_API_KEY` |
 | 图片 | Pollinations 图片模型生成真实底图，Sharp 再按已确认事实渲染稳定中文图层；PNG 可预览、保存、版本化和下载 | `POLLINATIONS_API_KEY`；账户需有可用 Pollen |
 | 语音 | 未作为当前公开工作台功能开放 | 接入真实语音 Provider 后再开放 |
-| Remotion 视频 | 浏览器预览与服务端渲染均已实现，生成真实 H.264 MP4 与 PNG 封面 | 服务器需能安装 Chromium；使用前核验 Remotion 许可 |
-| 成果下载 | 文本支持 MD/DOCX/HTML/TXT/JSON；结构化成果支持 JSON/XLSX/CSV/DOCX；主图支持 PNG/SVG/JSON；视频支持 MP4/PNG/SRT/ZIP/HTML/JSON；项目可整包 ZIP 下载 | 当前不生成 PDF，不用伪文件冒充 |
+| Remotion 视频 | 生成请求在真实 H.264 MP4 与 PNG 封面完成后才返回成功；内置 Noto Sans SC，检查 MP4 容器、媒体数据、索引与 H.264 轨道，并串行渲染避免低内存实例崩溃 | 服务器需能安装 Chromium；使用前核验 Remotion 许可 |
+| 成果下载 | 文本支持 MD/DOCX/HTML/TXT/JSON；结构化成果支持 JSON/XLSX/CSV/DOCX；主图支持 PNG/SVG/JSON；视频支持 MP4/PNG/SRT/ZIP/HTML/JSON；项目可整包 ZIP 下载；导出前检查文件头/可解析性，MP4 播放支持 Range 请求 | 当前不生成 PDF，不用伪文件冒充 |
 | Anthropic / Gemini | Adapter 和配置状态已实现，默认关闭 | 需要对应 API Key |
 | Docling / RAGFlow / Dify / ComfyUI / n8n / Langfuse | Adapter 边界和配置页已实现，默认关闭 | 需要独立部署；ComfyUI 通常需要 GPU；部分产品有商业或分发限制 |
 | 真实电商平台发布 | 未实现，且不由本项目自动执行 | 下一阶段需平台授权、当期规则审核和发布前人工确认 |

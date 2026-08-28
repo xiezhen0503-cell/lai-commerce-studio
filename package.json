@@ -11,6 +11,7 @@
   "scripts": {
     "app:setup": "tsx scripts/setup.ts",
     "app:doctor": "tsx scripts/doctor.ts",
+    "assets:prepare": "tsx scripts/prepare-video-assets.ts",
     "browser:install": "playwright install chromium webkit",
     "dev": "concurrently -n WEB,MCP,A2A -c blue,magenta,cyan \"pnpm --filter @lai/web dev\" \"pnpm --filter @lai/mcp-server dev\" \"pnpm --filter @lai/a2a-server dev\"",
     "build": "pnpm --filter @lai/web build && pnpm --filter @lai/mcp-server build && pnpm --filter @lai/a2a-server build",

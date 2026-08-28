@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommerceRepository } from "@lai/database";
 import { compilePrompt } from "@lai/prompt-engine";
-import { providerRegistry } from "@lai/providers";
-import { CommerceService, DEMO_PROJECT_ID, inspectVideoScriptArtifact } from "@lai/shared";
+import { MockTextProvider, providerRegistry } from "@lai/providers";
+import { CommerceService, DEMO_PROJECT_ID, inspectCommercePlanArtifact, inspectVideoScriptArtifact } from "@lai/shared";
 
 describe("短视频脚本生产质量门", () => {
   let repository: CommerceRepository | undefined;
@@ -67,5 +67,35 @@ describe("短视频脚本生产质量门", () => {
 
     await expect(service.runPrompt(DEMO_PROJECT_ID, prompt.spec.id, "script")).rejects.toMatchObject({ code: "MODEL_SCRIPT_INCOMPLETE" });
     expect(service.getProject(DEMO_PROJECT_ID).artifacts.filter((artifact) => artifact.type === "script")).toHaveLength(0);
+  });
+
+  it("拒绝只有标题和口号的空泛活动方案", () => {
+    const qa = inspectCommercePlanArtifact("# 新品上市方案\n\n## 策略\n打造爆款，实现品效合一。\n\n## 执行\n持续发布优质内容。");
+
+    expect(qa.passed).toBe(false);
+    expect(qa.score).toBeLessThan(40);
+    expect(qa.issues).toContain("缺少可衡量目标或核心指标");
+    expect(qa.issues).toContain("缺少至少 5 天有具体动作的 7 天执行排期");
+  });
+
+  it("完整活动方案包含指标、内容矩阵、逐日动作、资源与止损", async () => {
+    repository = new CommerceRepository(":memory:");
+    const service = new CommerceService(repository);
+    const context = service.makeCompileContext(DEMO_PROJECT_ID, "生成一份7天新品上市方案", "creative");
+    const complete = (await new MockTextProvider().generate(context.spec, "")).text;
+    const qa = inspectCommercePlanArtifact(complete);
+
+    expect(qa).toMatchObject({ passed: true, score: 100, scheduledDays: 7 });
+    expect(qa.actionCount).toBeGreaterThanOrEqual(7);
+  });
+
+  it("真实模型连续两次只给方案提纲时拒绝保存", async () => {
+    repository = new CommerceRepository(":memory:");
+    const service = new CommerceService(repository);
+    const prompt = service.generatePrompt(DEMO_PROJECT_ID, "生成一份7天新品上市方案", "creative");
+    vi.spyOn(providerRegistry.text, "generate").mockResolvedValue({ text: "# 新品上市方案\n\n## 策略\n打造爆款。", model: "test-live-model", latencyMs: 10, tokenUsage: 20 });
+
+    await expect(service.runPrompt(DEMO_PROJECT_ID, prompt.spec.id, "proposal")).rejects.toMatchObject({ code: "MODEL_PLAN_INCOMPLETE" });
+    expect(service.getProject(DEMO_PROJECT_ID).artifacts.filter((artifact) => artifact.type === "proposal")).toHaveLength(0);
   });
 });

@@ -1,7 +1,14 @@
 import path from "node:path";
+import fs from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 
 const accessPath = "/access/e2e-workbench-access";
+
+function dataIdFromExportHref(href: string | null) {
+  const id = href?.match(/\/artifacts\/([^/]+)\/export/)?.[1];
+  if (!id) throw new Error(`无法从下载链接识别成果 ID：${href}`);
+  return id;
+}
 
 async function createIsolatedProject(page: import("@playwright/test").Page, suffix: string) {
   const response = await page.request.post("/api/v1/projects", {
@@ -152,6 +159,21 @@ test("商业 Demo 的资料、事实、版本、图片、视频、审核和导�
   await page.getByRole("button", { name: "视频", exact: true }).click();
   await expect(page.locator("video")).toBeVisible();
   await expect(page.getByRole("link", { name: "下载 MP4" })).toHaveAttribute("href", /format=mp4/);
+  const videoArtifactId = dataIdFromExportHref(await page.getByRole("link", { name: "下载 MP4" }).getAttribute("href"));
+  const mp4Response = await page.request.get(`/api/v1/artifacts/${videoArtifactId}/export?format=mp4`);
+  if (!mp4Response.ok()) throw new Error(`MP4 下载失败（${mp4Response.status()}）：${await mp4Response.text()}`);
+  expect(mp4Response.headers()["content-type"]).toContain("video/mp4");
+  expect(mp4Response.headers()["content-disposition"]).toContain("attachment");
+  const mp4 = await mp4Response.body();
+  expect(mp4.byteLength).toBeGreaterThan(16_384);
+  expect(mp4.subarray(4, 8).toString("ascii")).toBe("ftyp");
+  expect(mp4.includes(Buffer.from("moov"))).toBe(true);
+  expect(mp4.includes(Buffer.from("mdat"))).toBe(true);
+  expect(mp4.includes(Buffer.from("avc1"))).toBe(true);
+  const rangeResponse = await page.request.get(`/api/v1/artifacts/${videoArtifactId}/export?format=mp4&inline=1`, { headers: { range: "bytes=0-1023" } });
+  expect(rangeResponse.status()).toBe(206);
+  expect(rangeResponse.headers()["content-range"]).toMatch(/^bytes 0-1023\//);
+  expect(rangeResponse.headers()["content-disposition"]).toContain("inline");
 
   await page.getByRole("button", { name: "方案", exact: true }).click();
   await page.getByRole("button", { name: "编辑", exact: true }).click();
@@ -174,6 +196,16 @@ test("商业 Demo 的资料、事实、版本、图片、视频、审核和导�
   expect(markdownResponse.ok()).toBeTruthy();
   expect(markdownResponse.headers()["content-type"]).toContain("text/markdown");
   expect(await markdownResponse.text()).toContain("人工修订商业验收方案");
+  const wordLink = proposalRow.getByRole("link", { name: "Word", exact: true });
+  const docxResponse = await page.request.get((await wordLink.getAttribute("href"))!);
+  expect(docxResponse.headers()["content-type"]).toContain("wordprocessingml");
+  expect((await docxResponse.body()).subarray(0, 2).toString()).toBe("PK");
+  const downloadEvent = page.waitForEvent("download");
+  await wordLink.click();
+  const downloadedWord = await downloadEvent;
+  expect(await downloadedWord.failure()).toBeNull();
+  expect(downloadedWord.suggestedFilename()).toMatch(/\.docx$/);
+  expect((await fs.readFile((await downloadedWord.path())!)).subarray(0, 2).toString()).toBe("PK");
 
   const storyboardRow = page.locator("li.list-item").filter({ hasText: "五张主图 Storyboard" }).first();
   const xlsxResponse = await page.request.get((await storyboardRow.getByRole("link", { name: "Excel", exact: true }).getAttribute("href"))!);
@@ -186,6 +218,12 @@ test("商业 Demo 的资料、事实、版本、图片、视频、审核和导�
   expect(await svgResponse.text()).toContain("<svg");
 
   const videoRow = page.locator("li.list-item").filter({ hasText: "可下载 MP4 商品视频" }).first();
+  const posterResponse = await page.request.get((await videoRow.getByRole("link", { name: "PNG 封面", exact: true }).getAttribute("href"))!);
+  expect(posterResponse.headers()["content-type"]).toContain("image/png");
+  expect((await posterResponse.body()).subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  const subtitleResponse = await page.request.get((await videoRow.getByRole("link", { name: "SRT 字幕", exact: true }).getAttribute("href"))!);
+  expect(subtitleResponse.headers()["content-type"]).toContain("application/x-subrip");
+  expect(await subtitleResponse.text()).toContain("00:00:00,000 -->");
   const videoZipResponse = await page.request.get((await videoRow.getByRole("link", { name: "项目包 ZIP", exact: true }).getAttribute("href"))!);
   expect(videoZipResponse.headers()["content-type"]).toContain("application/zip");
   expect((await videoZipResponse.body()).subarray(0, 2).toString()).toBe("PK");

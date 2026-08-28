@@ -6,6 +6,7 @@ import { fail, requireWorkbenchAccess } from "../../../../_lib/http";
 import { parseCommerceVideoSpec, renderCommerceVideo } from "../../../../_lib/video-render";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 function safeName(value: string) {
   return value.replace(/[\\/:*?"<>|\r\n]+/g, "-").replace(/\s+/g, "-").slice(0, 70) || "artifact";
@@ -35,6 +36,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ proj
         zip.file(`artifacts/${fileName}`, file.bytes);
         manifest.push({ artifactId: artifact.id, title: artifact.title, type: artifact.type, version: version.version, factSnapshotId: version.factSnapshotId, status: artifact.status, file: `artifacts/${fileName}`, format: file.format });
       } catch (error) {
+        if (process.env.LAI_REQUIRE_LIVE_OUTPUTS === "true") {
+          throw new CommerceError("PROJECT_NATIVE_EXPORT_FAILED", `${artifact.title} 的原生文件导出失败：${error instanceof Error ? error.message : "未知错误"}`, 503);
+        }
         const fallback = await buildArtifactExport({ artifact, version }, "json");
         const fileName = `${String(index + 1).padStart(2, "0")}-${safeName(artifact.title)}-v${version.version}.json`;
         zip.file(`artifacts/${fileName}`, fallback.bytes);

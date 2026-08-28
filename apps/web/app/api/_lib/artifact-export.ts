@@ -213,17 +213,39 @@ export async function buildArtifactExport(input: ArtifactExportInput, requested?
   const format = (requested || defaultArtifactExportFormat(input.artifact.type)) as ArtifactExportFormat;
   if (!formats.includes(format)) throw new Error(`成果类型 ${input.artifact.type} 不支持 ${format} 导出；可用格式：${formats.join("、")}`);
   if (format === "mp4" || format === "png") throw new Error(`${format.toUpperCase()} 需要由视频渲染服务生成`);
-  if (format === "srt") return { bytes: Buffer.from(subtitleDocument(input)), contentType: "application/x-subrip; charset=utf-8", extension: "srt", format };
-  if (format === "original") return originalImage(input);
-  if (format === "svg") return { bytes: imageSvg(input), contentType: "image/svg+xml; charset=utf-8", extension: "svg", format };
-  if (format === "zip") return { bytes: await videoZip(input), contentType: "application/zip", extension: "zip", format };
-  if (format === "docx") return { bytes: await docxDocument(input), contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", extension: "docx", format };
-  if (format === "xlsx") return { bytes: await xlsxDocument(input), contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", extension: "xlsx", format };
-  if (format === "json") return { bytes: Buffer.from(jsonEnvelope(input)), contentType: "application/json; charset=utf-8", extension: "json", format };
-  if (format === "csv") return { bytes: Buffer.from(csvDocument(input.version.content)), contentType: "text/csv; charset=utf-8", extension: "csv", format };
-  if (format === "html") return { bytes: Buffer.from(input.artifact.type === "video" ? videoPreviewHtml(input) : htmlDocument(input)), contentType: "text/html; charset=utf-8", extension: "html", format };
-  if (format === "txt") return { bytes: Buffer.from(plainText(input.version.content)), contentType: "text/plain; charset=utf-8", extension: "txt", format };
-  return { bytes: Buffer.from(input.version.content), contentType: "text/markdown; charset=utf-8", extension: "md", format: "md" };
+  let file: ArtifactExportFile;
+  if (format === "srt") file = { bytes: Buffer.from(subtitleDocument(input)), contentType: "application/x-subrip; charset=utf-8", extension: "srt", format };
+  else if (format === "original") file = originalImage(input);
+  else if (format === "svg") file = { bytes: imageSvg(input), contentType: "image/svg+xml; charset=utf-8", extension: "svg", format };
+  else if (format === "zip") file = { bytes: await videoZip(input), contentType: "application/zip", extension: "zip", format };
+  else if (format === "docx") file = { bytes: await docxDocument(input), contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", extension: "docx", format };
+  else if (format === "xlsx") file = { bytes: await xlsxDocument(input), contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", extension: "xlsx", format };
+  else if (format === "json") file = { bytes: Buffer.from(jsonEnvelope(input)), contentType: "application/json; charset=utf-8", extension: "json", format };
+  else if (format === "csv") file = { bytes: Buffer.from(csvDocument(input.version.content)), contentType: "text/csv; charset=utf-8", extension: "csv", format };
+  else if (format === "html") file = { bytes: Buffer.from(input.artifact.type === "video" ? videoPreviewHtml(input) : htmlDocument(input)), contentType: "text/html; charset=utf-8", extension: "html", format };
+  else if (format === "txt") file = { bytes: Buffer.from(plainText(input.version.content)), contentType: "text/plain; charset=utf-8", extension: "txt", format };
+  else file = { bytes: Buffer.from(input.version.content), contentType: "text/markdown; charset=utf-8", extension: "md", format: "md" };
+  return verifyArtifactExport(file);
+}
+
+export function verifyArtifactExport(file: ArtifactExportFile) {
+  if (!file.bytes.byteLength) throw new Error(`${file.extension.toUpperCase()} 导出结果为空`);
+  if (["zip", "docx", "xlsx"].includes(file.extension) && file.bytes.subarray(0, 2).toString("ascii") !== "PK") {
+    throw new Error(`${file.extension.toUpperCase()} 导出结果不是有效的 ZIP/OpenXML 文件`);
+  }
+  if (file.extension === "png" && !file.bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+    throw new Error("PNG 导出结果缺少有效文件头");
+  }
+  if (["jpg", "jpeg"].includes(file.extension) && !(file.bytes[0] === 0xff && file.bytes[1] === 0xd8)) {
+    throw new Error("JPEG 导出结果缺少有效文件头");
+  }
+  if (file.extension === "json") {
+    try { JSON.parse(file.bytes.toString("utf8")); } catch { throw new Error("JSON 导出结果无法解析"); }
+  }
+  if (["md", "txt", "html", "csv", "srt", "svg"].includes(file.extension) && !file.bytes.toString("utf8").trim()) {
+    throw new Error(`${file.extension.toUpperCase()} 导出结果没有可读内容`);
+  }
+  return file;
 }
 
 export function downloadHeaders(title: string, version: number, extension: string, contentType: string) {

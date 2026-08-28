@@ -356,17 +356,25 @@ paths:
     get:
       tags: [Campaigns]
       summary: 按成果类型导出当前版本
-      description: 文本成果支持 MD/DOCX/HTML/TXT/JSON；结构化成果支持 JSON/XLSX/CSV/DOCX；图片支持 PNG/SVG/JSON；视频支持 H.264 MP4、PNG 封面、SRT 字幕、Remotion ZIP、HTML 和 JSON。实际可用格式由成果类型决定。
+      description: 文本成果支持 MD/DOCX/HTML/TXT/JSON；结构化成果支持 JSON/XLSX/CSV/DOCX；图片支持 PNG/SVG/JSON；视频支持经过文件完整性检查的 H.264 MP4、PNG 封面、SRT 字幕、Remotion ZIP、HTML 和 JSON。MP4 支持 Range 分段读取；实际可用格式由成果类型决定。
       security: [{ WorkbenchAccess: [] }]
       parameters:
         - name: format
           in: query
           required: false
           schema: { type: string, enum: [md, txt, html, json, csv, xlsx, docx, original, png, svg, mp4, srt, zip] }
+        - name: inline
+          in: query
+          required: false
+          description: 仅用于 MP4；设为 1 时返回 inline Content-Disposition，供网页播放器分段读取。
+          schema: { type: string, enum: ['1'] }
       responses:
         '200': { description: 文件响应 }
+        '206': { description: MP4 Range 分段响应 }
         '400': { $ref: '#/components/responses/Error' }
         '401': { $ref: '#/components/responses/Error' }
+        '416': { description: MP4 Range 超出文件范围 }
+        '503': { $ref: '#/components/responses/Error' }
   /api/v1/projects/{projectId}/artifacts/{artifactId}/versions/{versionId}/restore:
     parameters:
       - { $ref: '#/components/parameters/ProjectId' }

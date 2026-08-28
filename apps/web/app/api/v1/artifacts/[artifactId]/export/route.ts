@@ -7,6 +7,35 @@ import { parseCommerceVideoSpec, renderCommercePoster, renderCommerceVideo } fro
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
+function videoResponse(request: Request, bytes: Buffer, title: string, version: number) {
+  const url = new URL(request.url);
+  const inline = url.searchParams.get("inline") === "1";
+  const baseHeaders = downloadHeaders(title, version, "mp4", "video/mp4");
+  const headers: Record<string, string> = {
+    ...baseHeaders,
+    "accept-ranges": "bytes",
+    "content-disposition": inline ? baseHeaders["content-disposition"].replace(/^attachment;/, "inline;") : baseHeaders["content-disposition"]
+  };
+  const range = request.headers.get("range")?.match(/^bytes=(\d*)-(\d*)$/i);
+  if (!range) {
+    headers["content-length"] = String(bytes.byteLength);
+    return new Response(new Uint8Array(bytes), { status: 200, headers });
+  }
+  const suffixLength = !range[1] && range[2] ? Number(range[2]) : undefined;
+  const requestedStart = suffixLength === undefined ? Number(range[1] || 0) : Math.max(0, bytes.byteLength - suffixLength);
+  const requestedEnd = suffixLength === undefined && range[2] ? Number(range[2]) : bytes.byteLength - 1;
+  if (!Number.isFinite(requestedStart) || !Number.isFinite(requestedEnd) || requestedStart < 0 || requestedStart >= bytes.byteLength || requestedEnd < requestedStart) {
+    headers["content-range"] = `bytes */${bytes.byteLength}`;
+    return new Response(null, { status: 416, headers });
+  }
+  const start = requestedStart;
+  const end = Math.min(requestedEnd, bytes.byteLength - 1);
+  const chunk = bytes.subarray(start, end + 1);
+  headers["content-range"] = `bytes ${start}-${end}/${bytes.byteLength}`;
+  headers["content-length"] = String(chunk.byteLength);
+  return new Response(new Uint8Array(chunk), { status: 206, headers });
+}
+
 export async function GET(request: Request, { params }: { params: Promise<{ artifactId: string }> }) {
   try {
     requireWorkbenchAccess(request);
@@ -23,7 +52,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ arti
       try {
         const outputPath = await renderCommerceVideo(parseCommerceVideoSpec(version.content));
         const bytes = await fs.readFile(outputPath);
-        return new Response(new Uint8Array(bytes), { headers: downloadHeaders(artifact.title, version.version, "mp4", "video/mp4") });
+        return videoResponse(request, bytes, artifact.title, version.version);
       } catch (error) {
         throw new CommerceError("VIDEO_RENDER_FAILED", error instanceof Error ? `视频成片渲染失败：${error.message}` : "视频成片渲染失败", 503);
       }
