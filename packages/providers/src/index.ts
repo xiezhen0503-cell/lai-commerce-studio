@@ -5,7 +5,7 @@ import JSZip from "jszip";
 import mammoth from "mammoth";
 import { extractText, getDocumentProxy } from "unpdf";
 
-export const IMAGE_PIPELINE_VERSION = "image-v2-font-ocr";
+export const IMAGE_PIPELINE_VERSION = "image-v3-font-ocr-advisory";
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -21,6 +21,8 @@ const COMMERCE_INSTRUCTIONS = `你是 LaiCommerce Studio 的中文电商内容�
 - 只使用用户输入中明确给出的事实，不补造价格、规格、活动日期、资质、功效或销量。
 - 把已确认事实、创意建议和待确认信息分开表达；缺失信息明确标记“待确认”。
 - 输出具体、可执行、适合新手继续修改的中文内容，避免模板化空话和夸大承诺。
+- 输出前先在内部核对用户目标、目标人群、渠道、约束和事实缺口，再组织最终答案；不要展示内部推理过程。
+- 每个建议尽量写清具体动作、使用场景或负责人、交付物以及判断是否有效的方法。
 - 保留输入中的品牌语气、平台要求、证据引用和合规边界。
 - 只生成草稿，不声称已经发布、投放、扣费或修改店铺。`;
 
@@ -292,7 +294,7 @@ export class OpenRouterFreeTextProvider implements TextGenerationProvider {
   name = "openrouter-free";
   get configured() { return openRouterConfigured(); }
 
-  async generate(_spec: PromptSpec, prompt: string) {
+  async generate(spec: PromptSpec, prompt: string) {
     const apiKey = process.env.OPENROUTER_API_KEY?.trim();
     if (!apiKey) throw new Error("免费测试模型尚未配置：请在服务端设置 OPENROUTER_API_KEY，密钥不要放进网页或提交到 GitHub。");
 
@@ -316,8 +318,8 @@ export class OpenRouterFreeTextProvider implements TextGenerationProvider {
             { role: "system", content: COMMERCE_INSTRUCTIONS },
             { role: "user", content: prompt }
           ],
-          temperature: 0.6,
-          max_tokens: 3_500
+          temperature: /严格 JSON|JSON 对象/.test(spec.outputFormat) ? 0.2 : 0.5,
+          max_tokens: /严格 JSON|JSON 对象/.test(spec.outputFormat) ? 5_000 : 4_000
         }),
         signal: controller.signal
       });
@@ -347,7 +349,7 @@ export class PollinationsQuestTextProvider implements TextGenerationProvider {
   name = "pollinations-quest";
   get configured() { return pollinationsTextConfigured(); }
 
-  async generate(_spec: PromptSpec, prompt: string) {
+  async generate(spec: PromptSpec, prompt: string) {
     const apiKey = process.env.POLLINATIONS_TEXT_API_KEY?.trim();
     if (!apiKey) throw new Error("免费测试文本模型尚未配置：请管理员设置服务端 Pollinations 文本 Key。");
     const model = pollinationsTextModel();
@@ -364,8 +366,8 @@ export class PollinationsQuestTextProvider implements TextGenerationProvider {
             { role: "system", content: COMMERCE_INSTRUCTIONS },
             { role: "user", content: prompt }
           ],
-          temperature: 0.55,
-          max_tokens: 3_500
+          temperature: /严格 JSON|JSON 对象/.test(spec.outputFormat) ? 0.2 : 0.45,
+          max_tokens: /严格 JSON|JSON 对象/.test(spec.outputFormat) ? 5_000 : 4_000
         }),
         signal: controller.signal
       });
@@ -596,7 +598,7 @@ export function getImageProviderStatus() {
     externalGeneration: true,
     authenticated: Boolean(process.env.POLLINATIONS_API_KEY?.trim()),
     pipelineVersion: IMAGE_PIPELINE_VERSION,
-    typography: { overlayFont: "Noto Sans SC", qualityGate: "local-chi-sim-ocr", maxAttempts: 2 }
+    typography: { overlayFont: "Noto Sans SC", ocrReview: "advisory", maxAttempts: 2 }
   };
   return {
     mode: "deterministic" as const,
@@ -607,7 +609,7 @@ export function getImageProviderStatus() {
     externalGeneration: false,
     authenticated: false,
     pipelineVersion: IMAGE_PIPELINE_VERSION,
-    typography: { overlayFont: "Noto Sans SC", qualityGate: "not-required", maxAttempts: 1 }
+    typography: { overlayFont: "Noto Sans SC", ocrReview: "not-required", maxAttempts: 1 }
   };
 }
 

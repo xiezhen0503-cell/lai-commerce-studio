@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CommerceRepository } from "@lai/database";
 import { buildGroundedImagePrompt, CommerceService, composeUsableProductImage, DEMO_PROJECT_ID, inspectTextFreeImage, renderChineseTextLayer } from "@lai/shared";
 
-describe("商品图片生产质量门", () => {
+describe("商品图片生成与辅助检查", () => {
   let repository: CommerceRepository | undefined;
 
   afterEach(() => repository?.close());
@@ -36,7 +36,7 @@ describe("商品图片生产质量门", () => {
     expect(qa.recognizedText.replaceAll(" ", "")).toMatch(/创意|概念/);
   }, 20_000);
 
-  it("纯摄影色块没有文字时通过质量门", async () => {
+  it("纯摄影色块的辅助 OCR 不报告文字", async () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="640"><rect width="640" height="640" fill="#eee9df"/><circle cx="320" cy="320" r="180" fill="#98a879"/></svg>';
     const qa = await inspectTextFreeImage(`data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`);
 

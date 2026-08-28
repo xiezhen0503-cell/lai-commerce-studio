@@ -121,7 +121,7 @@
 .promptLabel { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; font-size: 12px; font-weight: 850; }
 .promptLabel small { color: #999bad; font: 500 9px ui-monospace,monospace; }
 .promptBox { overflow: hidden; border: 1px solid #cac7ec; border-radius: 16px; background: white; box-shadow: 0 0 0 4px rgba(81,70,200,.04); }
-.promptBox textarea { width: 100%; min-height: 112px; padding: 17px; resize: vertical; border: 0; outline: 0; color: #25253e; background: transparent; font-size: 13px; line-height: 1.75; }
+.promptBox textarea { width: 100%; min-height: 168px; padding: 17px; resize: vertical; border: 0; outline: 0; color: #25253e; background: transparent; font-size: 13px; line-height: 1.75; }
 .promptFooter { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 9px; border-top: 1px solid #ececf3; background: #fbfbfd; }
 .promptFooter > div { display: flex; align-items: center; gap: 6px; padding-left: 6px; color: #7b7e94; font-size: 9px; }
 .promptFooter > div svg { color: var(--violet); }
@@ -138,10 +138,6 @@
 .resultEyebrow { display: flex; align-items: center; gap: 6px; color: #138161; font-size: 9px; font-weight: 900; letter-spacing: .08em; }
 .resultHead h2 { margin: 8px 0 4px; font-size: 20px; }
 .resultHead p { margin: 0; color: #7c7f93; font-size: 10px; }
-.score { width: 72px; height: 72px; flex: 0 0 auto; display: grid; place-items: center; align-content: center; border: 6px solid #d8f5e9; border-radius: 50%; color: #126e55; background: white; }
-.score strong,.score span { display: block; text-align: center; }
-.score strong { font: 900 20px/1 ui-monospace,monospace; }
-.score span { margin-top: 4px; font-size: 7px; }
 .resultBody { display: grid; grid-template-columns: minmax(0,1fr) 230px; }
 .output { min-width: 0; border-right: 1px solid #ececf2; }
 .outputToolbar { display: flex; align-items: center; justify-content: space-between; padding: 11px 18px; border-bottom: 1px solid #ececf2; color: #65687b; font-size: 9px; font-weight: 800; }

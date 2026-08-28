@@ -62,7 +62,9 @@ test("新手工作台可以从一句话生成第一版内容", async ({ page }) 
   await expect(page.getByRole("button", { name: /自由创作/ })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByText(/无需资料|具体商品事实统一标为待确认/).first()).toBeVisible();
   await page.getByRole("button", { name: /活动方案/ }).click();
-  await page.getByLabel("用一句话说说你的要求").fill("为草莓燕麦杯做一份 7 天新品上市方案，价格未确认时必须留空");
+  const detailedInput = page.getByLabel("详细说说你的要求");
+  await expect(detailedInput).toHaveAttribute("maxlength", "2000");
+  await detailedInput.fill("为草莓燕麦杯做一份 7 天新品上市方案，价格未确认时必须留空");
   await page.getByRole("button", { name: "帮我生成第一版" }).click();
   await expect(page.getByText("第一版已完成", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "新品上市方案", exact: true })).toBeVisible();
@@ -71,16 +73,16 @@ test("新手工作台可以从一句话生成第一版内容", async ({ page }) 
   await expect(page.getByRole("button", { name: "复制结果" })).toBeVisible();
 
   await page.getByRole("button", { name: /短视频脚本/ }).click();
-  await page.getByLabel("用一句话说说你的要求").fill("写一条 30 秒短视频脚本，必须包含画面、口播、字幕和三个开场版本");
+  await page.getByLabel("详细说说你的要求").fill("写一条 30 秒短视频脚本，必须包含画面、口播、字幕和三个开场版本");
   await page.getByRole("button", { name: "帮我生成第一版" }).click();
   await expect(page.getByRole("heading", { name: "A/B/C 前 3 秒开场" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "30 秒逐镜头脚本" })).toBeVisible();
   await expect(page.getByRole("table")).toBeVisible();
-  await expect(page.getByText("成果质量分", { exact: true })).toBeVisible();
+  await expect(page.getByText("成果质量分", { exact: true })).toHaveCount(0);
   await expect(page.getByText("executiveSummary", { exact: true })).toHaveCount(0);
 
   await page.getByRole("button", { name: /AI 商品图/ }).click();
-  await page.getByLabel("用一句话说说你的要求").fill("生成一张方形商品主图，不要编造价格、规格和功效文字");
+  await page.getByLabel("详细说说你的要求").fill("生成一张方形商品主图，不要编造价格、规格和功效文字");
   await page.getByRole("button", { name: "帮我生成第一版" }).click();
   await expect(page.getByRole("img", { name: "AI 生成并完成中文信息排版的商品主图" })).toBeVisible();
   await expect(page.getByRole("link", { name: "下载原图" })).toBeVisible();

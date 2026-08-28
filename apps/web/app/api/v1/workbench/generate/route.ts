@@ -9,7 +9,7 @@ export const maxDuration = 300;
 
 const WorkbenchGenerateBodySchema = z.object({
   projectId: z.string().trim().min(1).max(120),
-  objective: z.string().trim().min(8).max(500),
+  objective: z.string().trim().min(8).max(2_200),
   task: z.enum(["single", "bundle"]).default("single"),
   artifactType: ArtifactTypeSchema.default("proposal"),
   generationMode: z.enum(["creative", "grounded"]).default("creative")

@@ -191,7 +191,7 @@ paths:
               required: [projectId, objective]
               properties:
                 projectId: { type: string }
-                objective: { type: string, maxLength: 500 }
+                objective: { type: string, maxLength: 2200 }
                 task: { type: string, enum: [single, bundle] }
                 artifactType: { type: string, enum: [proposal, script, storyboard, image-prompt, image, video-storyboard, video, caption, schedule, report, prompt, handoff] }
                 generationMode: { type: string, enum: [creative, grounded], default: creative }

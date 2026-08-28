@@ -175,8 +175,8 @@ describe("安全、权限和 Provider", () => {
       mode: "pollinations",
       live: true,
       model: "zimage",
-      pipelineVersion: "image-v2-font-ocr",
-      typography: { overlayFont: "Noto Sans SC", qualityGate: "local-chi-sim-ocr", maxAttempts: 2 }
+      pipelineVersion: "image-v3-font-ocr-advisory",
+      typography: { overlayFont: "Noto Sans SC", ocrReview: "advisory", maxAttempts: 2 }
     });
   });
 

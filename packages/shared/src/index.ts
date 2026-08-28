@@ -216,127 +216,257 @@ function firstMeaningfulLine(markdown: string, fallback: string) {
   return markdown.split(/\r?\n/).map((line) => line.replace(/^#+\s*/, "").replace(/^[-*]\s*/, "").trim()).find((line) => line.length >= 4)?.slice(0, 32) || fallback;
 }
 
-export type VideoScriptQa = {
-  passed: boolean;
-  score: number;
-  issues: string[];
-  characterCount: number;
-  timelineSegments: number;
-  timelineEndSeconds: number;
-  openingVariants: number;
-};
+const CommercePlanModelSchema = z.object({
+  title: z.string().trim().min(1),
+  summary: z.string().trim().min(1),
+  goals: z.array(z.object({
+    goal: z.string().trim().min(1),
+    kpi: z.string().trim().min(1),
+    observationPeriod: z.string().trim().min(1),
+    successCriteria: z.string().trim().min(1)
+  })).min(1),
+  audience: z.object({
+    segment: z.string().trim().min(1),
+    scenes: z.array(z.string().trim().min(1)).min(1),
+    barriers: z.array(z.string().trim().min(1)).min(1)
+  }),
+  platformStrategies: z.array(z.object({
+    platform: z.string().trim().min(1),
+    approach: z.string().trim().min(1)
+  })).min(1),
+  strategies: z.array(z.string().trim().min(1)).min(1),
+  contentMatrix: z.array(z.object({
+    theme: z.string().trim().min(1),
+    benefit: z.string().trim().min(1),
+    evidence: z.string().trim().min(1),
+    format: z.string().trim().min(1),
+    cta: z.string().trim().min(1)
+  })).min(1),
+  schedule: z.array(z.object({
+    day: z.coerce.number().int().min(1).max(7),
+    owner: z.string().trim().min(1),
+    action: z.string().trim().min(1),
+    deliverable: z.string().trim().min(1),
+    metric: z.string().trim().min(1)
+  })).min(1),
+  resources: z.array(z.object({
+    role: z.string().trim().min(1),
+    responsibility: z.string().trim().min(1),
+    requirement: z.string().trim().min(1),
+    budgetOrHours: z.string().trim().min(1)
+  })).min(1),
+  review: z.object({
+    metrics: z.string().trim().min(1),
+    reviewTimes: z.string().trim().min(1),
+    scaleCondition: z.string().trim().min(1),
+    adjustCondition: z.string().trim().min(1),
+    stopCondition: z.string().trim().min(1)
+  }),
+  boundaries: z.object({
+    confirmedFacts: z.array(z.string().trim().min(1)),
+    creativeAssumptions: z.array(z.string().trim().min(1)).min(1),
+    pendingConfirmations: z.array(z.string().trim().min(1)).min(1)
+  })
+});
 
-export type CommercePlanQa = {
-  passed: boolean;
-  score: number;
-  issues: string[];
-  characterCount: number;
-  headingCount: number;
-  actionCount: number;
-  scheduledDays: number;
-};
+type CommercePlanModel = z.infer<typeof CommercePlanModelSchema>;
 
-export function inspectCommercePlanArtifact(content: string): CommercePlanQa {
-  const normalized = content.replace(/\r\n?/g, "\n").trim();
-  const characterCount = normalized.replace(/[\s|#*_`>-]/g, "").length;
-  const headingCount = (normalized.match(/^#{1,4}\s+.+$/gm) || []).length;
-  const actionCount = normalized.split("\n").filter((line) => /^(?:\s*[-*]|\s*\|)/.test(line) && /发布|拍摄|制作|剪辑|投放|测试|复盘|优化|调整|确认|核对|收集|记录|汇总|跟进|执行|交付|决定/.test(line)).length;
-  const scheduledDays = new Set(Array.from(normalized.matchAll(/(?:第\s*([1-7一二三四五六七])\s*天|Day\s*([1-7]))/gi)).map((match) => match[1] || match[2])).size;
-  const hasGoalAndMetrics = /目标/.test(normalized) && /指标|KPI|转化率|点击率|互动率|成交|GMV|加购|收藏|完播率/.test(normalized);
-  const hasAudienceAndPlatform = /人群|受众|用户画像/.test(normalized) && /平台|小红书|抖音|微信|淘宝|天猫|京东/.test(normalized);
-  const hasStrategy = /策略|核心判断|主线|定位/.test(normalized);
-  const hasContentMatrix = /内容矩阵|内容方向|选题|内容支柱|素材/.test(normalized);
-  const hasCadence = /7\s*天|七天|排期|节奏|第\s*[1-7一二三四五六七]\s*天|Day\s*[1-7]/i.test(normalized);
-  const hasOwnershipOrResources = /负责人|分工|预算|资源|工时|所需人员/.test(normalized);
-  const hasStopRule = /止损|停止条件|暂停条件|阈值|不达标|复盘条件/.test(normalized);
-  const hasConfirmationBoundary = /待确认|发布前确认|事实边界|创意假设|资料来源/.test(normalized);
-  const issues: string[] = [];
-  if (characterCount < 650) issues.push("正文过短，不足以形成可执行活动方案");
-  if (headingCount < 6) issues.push("方案结构少于 6 个完整章节");
-  if (!hasGoalAndMetrics) issues.push("缺少可衡量目标或核心指标");
-  if (!hasAudienceAndPlatform) issues.push("缺少目标人群与平台适配判断");
-  if (!hasStrategy) issues.push("缺少明确策略或核心判断");
-  if (!hasContentMatrix) issues.push("缺少内容矩阵、内容方向或素材规划");
-  if (!hasCadence || scheduledDays < 5) issues.push("缺少至少 5 天有具体动作的 7 天执行排期");
-  if (actionCount < 7) issues.push("可执行动作少于 7 项");
-  if (!hasOwnershipOrResources) issues.push("缺少负责人、分工、预算或资源假设");
-  if (!hasStopRule) issues.push("缺少复盘阈值或止损条件");
-  if (!hasConfirmationBoundary) issues.push("缺少事实来源、创意假设或发布前待确认项");
-  const score = Math.min(100,
-    Math.min(14, Math.round(characterCount / 650 * 14)) +
-    Math.min(10, headingCount * 2) +
-    (hasGoalAndMetrics ? 10 : 0) +
-    (hasAudienceAndPlatform ? 9 : 0) +
-    (hasStrategy ? 9 : 0) +
-    (hasContentMatrix ? 9 : 0) +
-    Math.min(10, scheduledDays * 2) +
-    Math.min(10, actionCount) +
-    (hasOwnershipOrResources ? 6 : 0) +
-    (hasStopRule ? 6 : 0) +
-    (hasConfirmationBoundary ? 7 : 0));
-  return { passed: issues.length === 0, score, issues, characterCount, headingCount, actionCount, scheduledDays };
+function modelJsonCandidate(text: string) {
+  const withoutFence = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+  const objectStart = withoutFence.indexOf("{");
+  const objectEnd = withoutFence.lastIndexOf("}");
+  return objectStart >= 0 && objectEnd > objectStart ? withoutFence.slice(objectStart, objectEnd + 1) : withoutFence;
 }
 
-export function inspectVideoScriptArtifact(content: string, targetDurationSeconds = 30): VideoScriptQa {
-  const normalized = content.replace(/\r\n?/g, "\n").trim();
-  const characterCount = normalized.replace(/[\s|#*_`>-]/g, "").length;
-  const timelineRanges = Array.from(normalized.matchAll(/(?:^|[\s|])([0-5]?\d)(?::([0-5]\d))?\s*(?:[-–—~至])\s*([0-5]?\d)(?::([0-5]\d))?\s*(?:秒|s)?(?=\s|[|，,。；;]|$)/gim));
-  const toSeconds = (minutes: string | undefined, seconds: string | undefined) => seconds === undefined ? Number(minutes || 0) : Number(minutes || 0) * 60 + Number(seconds || 0);
-  const timelineEndSeconds = timelineRanges.reduce((maximum, match) => Math.max(maximum, toSeconds(match[3], match[4])), 0);
-  const openingVariants = normalized.split("\n").filter((line) => /^(?:\s*#+\s*)?(?:[-*]\s*)?(?:开场\s*)?(?:[ABC]|[一二三])(?:版|方案)?[\s：:、.)）]/i.test(line)).length;
-  const hasVisual = /画面|镜头|景别|场景/.test(normalized);
-  const hasSpoken = /口播|台词|旁白/.test(normalized);
-  const hasSubtitle = /字幕|屏幕文字|屏显/.test(normalized);
-  const hasHook = /前\s*3\s*秒|0\s*(?:[-–—~至])\s*3\s*(?:秒|s)?|钩子/.test(normalized);
-  const hasProductionNotes = /拍摄清单|拍摄提示|道具|素材清单|执行提示/.test(normalized);
-  const hasConfirmationBoundary = /待确认|发布前确认|事实边界|创意假设/.test(normalized);
-  const timelineSegments = timelineRanges.length;
-  const issues: string[] = [];
-  if (characterCount < 320) issues.push("正文过短，不足以支撑可拍摄脚本");
-  if (timelineSegments < 5) issues.push("时间轴少于 5 个镜头段落");
-  if (timelineEndSeconds < targetDurationSeconds - 1) issues.push(`时间轴没有覆盖到 ${targetDurationSeconds} 秒`);
-  if (!hasVisual) issues.push("缺少画面或镜头说明");
-  if (!hasSpoken) issues.push("缺少口播、台词或旁白");
-  if (!hasSubtitle) issues.push("缺少字幕或屏幕文字");
-  if (!hasHook) issues.push("缺少前 3 秒钩子");
-  if (openingVariants < 3) issues.push("缺少 3 个 A/B/C 开场版本");
-  if (!hasProductionNotes) issues.push("缺少拍摄或素材执行说明");
-  if (!hasConfirmationBoundary) issues.push("缺少创意假设或发布前待确认项");
-  const score = Math.min(100,
-    Math.min(15, Math.round(characterCount / 320 * 15)) +
-    Math.min(20, timelineSegments * 4) +
-    (timelineEndSeconds >= targetDurationSeconds - 1 ? 10 : 0) +
-    (hasVisual ? 8 : 0) +
-    (hasSpoken ? 8 : 0) +
-    (hasSubtitle ? 8 : 0) +
-    (hasHook ? 7 : 0) +
-    Math.min(9, openingVariants * 3) +
-    (hasProductionNotes ? 7 : 0) +
-    (hasConfirmationBoundary ? 8 : 0));
-  return { passed: issues.length === 0, score, issues, characterCount, timelineSegments, timelineEndSeconds, openingVariants };
+function markdownCell(value: string) {
+  return value.replace(/\s+/g, " ").replace(/\|/g, "／").trim();
+}
+
+function renderCommercePlanModel(plan: CommercePlanModel) {
+  const schedule = [...plan.schedule].sort((left, right) => left.day - right.day);
+  return `# ${plan.title.replace(/^#+\s*/, "")}
+
+## 方案摘要
+
+${plan.summary}
+
+## 目标与指标
+
+| 业务目标 | 核心 KPI | 观察周期 | 成功标准 |
+|---|---|---|---|
+${plan.goals.map((item) => `| ${markdownCell(item.goal)} | ${markdownCell(item.kpi)} | ${markdownCell(item.observationPeriod)} | ${markdownCell(item.successCriteria)} |`).join("\n")}
+
+## 目标人群与平台策略
+
+- **目标人群**：${plan.audience.segment}
+- **使用场景**：${plan.audience.scenes.join("；")}
+- **购买阻力**：${plan.audience.barriers.join("；")}
+${plan.platformStrategies.map((item) => `- **${item.platform}**：${item.approach}`).join("\n")}
+
+## 核心策略
+
+${plan.strategies.map((item, index) => `${index + 1}. ${item}`).join("\n")}
+
+## 内容矩阵
+
+| 内容主线 | 用户利益点 | 素材/证据 | 内容形式 | CTA |
+|---|---|---|---|---|
+${plan.contentMatrix.map((item) => `| ${markdownCell(item.theme)} | ${markdownCell(item.benefit)} | ${markdownCell(item.evidence)} | ${markdownCell(item.format)} | ${markdownCell(item.cta)} |`).join("\n")}
+
+## 7 天执行排期
+
+| 时间 | 负责人 | 具体执行动作 | 交付物 | 验收指标 |
+|---|---|---|---|---|
+${schedule.map((item) => `| 第 ${item.day} 天 | ${markdownCell(item.owner)} | 执行：${markdownCell(item.action)} | ${markdownCell(item.deliverable)} | ${markdownCell(item.metric)} |`).join("\n")}
+
+## 资源与预算假设
+
+| 角色/资源 | 分工 | 所需资源 | 预算或工时 |
+|---|---|---|---|
+${plan.resources.map((item) => `| ${markdownCell(item.role)} | ${markdownCell(item.responsibility)} | ${markdownCell(item.requirement)} | ${markdownCell(item.budgetOrHours)} |`).join("\n")}
+
+## 数据复盘与止损
+
+- **监测指标**：${plan.review.metrics}
+- **复盘时间**：${plan.review.reviewTimes}
+- **继续加码条件**：${plan.review.scaleCondition}
+- **调整条件**：${plan.review.adjustCondition}
+- **停止条件**：${plan.review.stopCondition}
+
+## 事实依据、创意假设与发布前待确认
+
+### 已确认事实
+${(plan.boundaries.confirmedFacts.length ? plan.boundaries.confirmedFacts : ["本次没有可引用的已确认商品事实，发布前需补充资料。"] ).map((item) => `- ${item}`).join("\n")}
+
+### 创意假设
+${plan.boundaries.creativeAssumptions.map((item) => `- ${item}`).join("\n")}
+
+### 发布前待确认
+${plan.boundaries.pendingConfirmations.map((item) => `- ${item}`).join("\n")}
+`;
+}
+
+function normalizeCommercePlanModelOutput(text: string) {
+  try {
+    const json = JSON.parse(modelJsonCandidate(text));
+    const checked = CommercePlanModelSchema.safeParse(json);
+    if (checked.success) {
+      const markdown = renderCommercePlanModel(checked.data);
+      return { markdown, structured: true, structureIssues: [] as string[] };
+    }
+    const structureIssues = checked.error.issues.slice(0, 10).map((issue) => `${issue.path.join(".") || "方案"}：${issue.message}`);
+    return { markdown: text.trim(), structured: false, structureIssues };
+  } catch {
+    return { markdown: text.trim(), structured: false, structureIssues: ["没有返回可解析的结构化方案 JSON"] };
+  }
+}
+
+const CommerceScriptModelSchema = z.object({
+  title: z.string().trim().min(1),
+  creativeDirection: z.string().trim().min(1),
+  openings: z.array(z.object({
+    label: z.string().trim().min(1),
+    visual: z.string().trim().min(1),
+    spoken: z.string().trim().min(1),
+    subtitle: z.string().trim().min(1)
+  })).min(1),
+  shots: z.array(z.object({
+    start: z.coerce.number().min(0),
+    end: z.coerce.number().positive(),
+    visual: z.string().trim().min(1),
+    action: z.string().trim().min(1),
+    spoken: z.string().trim().min(1),
+    subtitle: z.string().trim().min(1),
+    productBoundary: z.string().trim().min(1)
+  })).min(1),
+  production: z.object({
+    scenes: z.array(z.string().trim().min(1)).min(1),
+    props: z.array(z.string().trim().min(1)).min(1),
+    camera: z.array(z.string().trim().min(1)).min(1),
+    sound: z.array(z.string().trim().min(1)).min(1)
+  }),
+  creativeAssumptions: z.array(z.string().trim().min(1)).min(1),
+  pendingConfirmations: z.array(z.string().trim().min(1)).min(1)
+});
+
+type CommerceScriptModel = z.infer<typeof CommerceScriptModelSchema>;
+
+function renderCommerceScriptModel(script: CommerceScriptModel, targetDurationSeconds: number) {
+  const shots = [...script.shots].sort((left, right) => left.start - right.start);
+  return `# ${script.title.replace(/^#+\s*/, "")}
+
+## 创意主线
+
+${script.creativeDirection}
+
+## A/B/C 前 3 秒开场
+
+${script.openings.map((item) => `### ${item.label}\n- **画面**：${item.visual}\n- **口播**：${item.spoken}\n- **字幕**：${item.subtitle}`).join("\n\n")}
+
+## ${targetDurationSeconds} 秒逐镜头脚本
+
+| 时间 | 画面/景别 | 人物动作 | 口播/台词 | 字幕/屏幕文字 | 商品展示/事实边界 |
+|---|---|---|---|---|---|
+${shots.map((item) => `| ${item.start}–${item.end}s | ${markdownCell(item.visual)} | ${markdownCell(item.action)} | ${markdownCell(item.spoken)} | ${markdownCell(item.subtitle)} | ${markdownCell(item.productBoundary)} |`).join("\n")}
+
+## 拍摄与素材清单
+
+- **场景**：${script.production.scenes.join("；")}
+- **道具**：${script.production.props.join("；")}
+- **镜头与转场**：${script.production.camera.join("；")}
+- **声音**：${script.production.sound.join("；")}
+
+## 创意假设与发布前待确认
+
+### 创意假设
+${script.creativeAssumptions.map((item) => `- ${item}`).join("\n")}
+
+### 发布前待确认
+${script.pendingConfirmations.map((item) => `- ${item}`).join("\n")}
+`;
+}
+
+function normalizeCommerceScriptModelOutput(text: string, targetDurationSeconds: number) {
+  try {
+    const json = JSON.parse(modelJsonCandidate(text));
+    const checked = CommerceScriptModelSchema.safeParse(json);
+    if (checked.success) return { markdown: renderCommerceScriptModel(checked.data, targetDurationSeconds), structured: true, structureIssues: [] as string[] };
+    return { markdown: text.trim(), structured: false, structureIssues: checked.error.issues.slice(0, 10).map((issue) => `${issue.path.join(".") || "脚本"}：${issue.message}`) };
+  } catch {
+    return { markdown: text.trim(), structured: false, structureIssues: ["没有返回可解析的结构化脚本 JSON"] };
+  }
 }
 
 function videoScriptOutputFormat(targetDurationSeconds: number) {
-  return `只输出中文 Markdown 成品，不要输出 JSON，不要出现 executiveSummary、strategy、deliverables、evidence、risks 等程序字段。严格按以下顺序完整输出：
-1. 标题与创意主线。
-2. “A/B/C 前 3 秒开场”：必须有 A、B、C 三个不同版本，每个都写画面、口播和字幕。
-3. “${targetDurationSeconds} 秒逐镜头脚本”：使用 Markdown 表格，表头必须为“时间｜画面/景别｜人物动作｜口播/台词｜字幕/屏幕文字｜商品展示/事实边界”；至少 5 个连续时间段，从 0 秒覆盖到 ${targetDurationSeconds} 秒。
-4. “拍摄与素材清单”：列出场景、道具、景别、转场或声音要求。
-5. “创意假设与发布前待确认”：价格、规格、配料、产地、资质、功效、活动日期等没有证据的事实必须逐项写待确认。
-最终内容必须能直接交给拍摄人员执行，不能只给摘要、项目名、提纲或空表格。`;
+  return `只返回严格 JSON 对象，不要 Markdown 代码围栏，不要解释。系统会把数据排版成中文脚本。字段必须为：
+{
+  "title": "脚本标题",
+  "creativeDirection": "具体创意主线与核心冲突",
+  "openings": [{"label":"A版/B版/C版","visual":"前3秒画面","spoken":"口播","subtitle":"字幕"}],
+  "shots": [{"start":0,"end":3,"visual":"画面与景别","action":"人物动作","spoken":"口播或台词","subtitle":"字幕或屏幕文字","productBoundary":"商品如何展示、事实依据或待确认边界"}],
+  "production": {"scenes":["场景"],"props":["道具"],"camera":["景别、运镜或转场"],"sound":["声音要求"]},
+  "creativeAssumptions": ["创意假设"],
+  "pendingConfirmations": ["发布前待确认项"]
+}
+创作要求：openings 给 A/B/C 三个不同开场；shots 设计至少 5 个连续镜头，从 0 秒覆盖到 ${targetDurationSeconds} 秒；具体商品事实没有证据时写入 pendingConfirmations，不得编造。`;
 }
 
 function commercePlanOutputFormat() {
-  return `只输出中文 Markdown 成品，不要输出 JSON，不要出现 executiveSummary、strategy、deliverables、evidence、risks 等程序字段。方案必须有明确判断和可执行动作，严格按以下结构完整输出：
-1. “方案摘要”：用 3 到 5 句话写清目标、受众、平台和核心判断，不写空泛口号。
-2. “目标与指标”：列出业务目标、核心 KPI、观察周期和成功标准；没有历史基线时明确写“基线待确认”，不得编造数据。
-3. “目标人群与平台策略”：写清具体使用场景、购买阻力、内容角度，并分别说明目标平台的表达方式。
-4. “内容矩阵”：至少 3 条内容主线，每条包含利益点、素材/证据、内容形式和 CTA。
-5. “7 天执行排期”：从第 1 天到第 7 天逐日列出负责人、具体动作、交付物和验收指标，至少 5 天必须有真实执行动作。
-6. “资源与预算假设”：列出人员、素材、预算、工时或工具；无法确认的数字写“待确认”。
-7. “数据复盘与止损”：写明监测指标、复盘时间、继续加码条件、调整条件和停止条件。
-8. “事实依据、创意假设与发布前待确认”：把已确认事实、创意建议、缺失信息分开；价格、规格、日期、资质、功效等没有证据时逐项写待确认。
-正文至少 650 个有效字符、至少 7 个可执行动作，最终内容必须能直接交给运营人员执行，不能只给摘要、项目名、提纲或空表格。`;
+  return `只返回严格 JSON 对象，不要 Markdown 代码围栏，不要解释。系统会把数据排版成中文活动方案。字段必须为：
+{
+  "title": "方案标题",
+  "summary": "3到5句话，写清目标、受众、平台和核心判断",
+  "goals": [{"goal":"业务目标","kpi":"核心KPI或基线待确认","observationPeriod":"观察周期","successCriteria":"成功标准"}],
+  "audience": {"segment":"目标人群","scenes":["具体使用场景"],"barriers":["购买阻力"]},
+  "platformStrategies": [{"platform":"目标平台","approach":"适合该平台的表达与承接方式"}],
+  "strategies": ["明确策略与执行判断"],
+  "contentMatrix": [{"theme":"内容主线","benefit":"用户利益点","evidence":"素材、事实依据或待确认","format":"内容形式","cta":"下一步动作"}],
+  "schedule": [{"day":1,"owner":"负责人","action":"当天具体动作","deliverable":"交付物","metric":"验收指标"}],
+  "resources": [{"role":"角色或资源","responsibility":"分工","requirement":"所需素材或工具","budgetOrHours":"预算或工时；未知写待确认"}],
+  "review": {"metrics":"监测指标","reviewTimes":"复盘时间","scaleCondition":"继续加码条件","adjustCondition":"调整条件","stopCondition":"停止条件"},
+  "boundaries": {"confirmedFacts":["已确认事实；自由创作无事实时可为空"],"creativeAssumptions":["创意假设"],"pendingConfirmations":["发布前待确认项"]}
+}
+创作要求：contentMatrix 规划至少 3 条内容主线；schedule 写全第 1 天到第 7 天并给具体动作；不得编造价格、规格、日期、资质、功效、销量或评价。`;
 }
 
 function activeSkillsForTask(taskType: string, generationMode: GenerationMode) {
@@ -700,39 +830,35 @@ export class CommerceService {
         : structured
           ? this.requireUsableJson(generated.text, taskLabel)
           : generated.text.trim();
-    let scriptQa = needsProductionScript ? inspectVideoScriptArtifact(textDraft, scriptDuration) : undefined;
-    let planQa = needsCommercePlan ? inspectCommercePlanArtifact(textDraft) : undefined;
     let generationAttempts = 1;
-    if (needsProductionScript && scriptQa && !scriptQa.passed && generated.model !== "mock-text-v1") {
-      const correctionPrompt = `${prompt}\n\n## 上一版没有通过成果质量检查\n问题：${scriptQa.issues.join("；")}。\n请完全重写，不要解释失败原因，不要沿用残缺结构。必须严格完成 A/B/C 三个开场、至少 5 段并覆盖到 ${scriptDuration} 秒的时间轴、画面、动作、口播、字幕、商品展示/事实边界、拍摄清单和待确认项。\n\n<unusable_previous_draft>\n${textDraft.slice(0, 6_000)}\n</unusable_previous_draft>`;
-      const retried = await textProvider.generate(modelSpec, correctionPrompt);
-      generated = retried;
-      totalTokenUsage += retried.tokenUsage;
-      textDraft = retried.text.trim();
-      scriptQa = inspectVideoScriptArtifact(textDraft, scriptDuration);
-      generationAttempts = 2;
-    }
-    if (needsProductionScript && scriptQa && !scriptQa.passed) {
-      throw new CommerceError("MODEL_SCRIPT_INCOMPLETE", `免费测试模型连续两次没有返回可拍摄的${scriptDuration}秒脚本：${scriptQa.issues.join("；")}。系统没有把残缺摘要保存成成果，请重新生成。`, 502, scriptQa);
-    }
-    if (needsCommercePlan && planQa && !planQa.passed && generated.model !== "mock-text-v1") {
-      const correctionPrompt = `${prompt}\n\n## 上一版没有通过活动方案质量检查\n问题：${planQa.issues.join("；")}。\n请完全重写，不要解释失败原因，不要沿用残缺结构。必须补齐目标与 KPI、人群与平台判断、至少 3 条内容主线、逐日 7 天动作、负责人/资源、复盘与止损、事实依据和待确认项。\n\n<unusable_previous_draft>\n${textDraft.slice(0, 8_000)}\n</unusable_previous_draft>`;
-      const retried = await textProvider.generate(modelSpec, correctionPrompt);
-      generated = retried;
-      totalTokenUsage += retried.tokenUsage;
-      textDraft = retried.text.trim();
-      planQa = inspectCommercePlanArtifact(textDraft);
-      generationAttempts = 2;
-    }
-    if (needsCommercePlan && planQa && !planQa.passed) {
-      throw new CommerceError("MODEL_PLAN_INCOMPLETE", `免费测试模型连续两次没有返回可执行的活动方案：${planQa.issues.join("；")}。系统没有把空泛提纲保存成成果，请重新生成。`, 502, planQa);
+    let structuredPresentation = false;
+    let generationNotes: string[] = [];
+    if (generated.model !== "mock-text-v1" && (needsProductionScript || needsCommercePlan)) {
+      const first = needsProductionScript
+        ? normalizeCommerceScriptModelOutput(generated.text, scriptDuration)
+        : normalizeCommercePlanModelOutput(generated.text);
+      textDraft = first.markdown;
+      structuredPresentation = first.structured;
+      generationNotes = first.structureIssues;
+      if (!first.structured) {
+        const correctionPrompt = `${prompt}\n\n## 结构化整理\n上一版内容已经生成，但字段格式没有完全对齐。请保留其中有价值的判断和创意，按本任务的 JSON 字段重新整理。不要评价上一版，不要输出说明或 Markdown 代码围栏。\n\n<previous_draft>\n${generated.text.slice(0, 10_000)}\n</previous_draft>`;
+        const retried = await textProvider.generate(modelSpec, correctionPrompt);
+        generated = retried;
+        totalTokenUsage += retried.tokenUsage;
+        generationAttempts = 2;
+        const second = needsProductionScript
+          ? normalizeCommerceScriptModelOutput(retried.text, scriptDuration)
+          : normalizeCommercePlanModelOutput(retried.text);
+        if (second.structured || second.markdown.length >= first.markdown.length) textDraft = second.markdown;
+        structuredPresentation = second.structured;
+        generationNotes = second.structureIssues;
+      }
     }
     const content = artifactType === "video"
       ? this.buildVideoContent(context, textDraft, latestGeneratedImageUri(this.getProject(projectId)))
       : textDraft;
     const artifact = this.createArtifact(projectId, artifactType, taskLabel, content, context.snapshot.id, promptSpecId, { type: "platform-ai", id: generated.model });
-    const textQa = scriptQa ?? planQa;
-    const run = { id: newId("run"), promptVersionId: promptSpecId, provider: textProvider.name, model: generated.model, inputSnapshot: context.snapshot.id, factSnapshotId: context.snapshot.id, output: content, latency: Date.now() - started, tokenUsage: totalTokenUsage, estimatedCost: 0, qualityScore: textQa?.score ?? evaluatePrompt(spec, context.snapshot).total, qualityGate: textQa ? { type: scriptQa ? "video-script-v1" : "commerce-plan-v1", passed: textQa.passed, attempts: generationAttempts, issues: textQa.issues, metrics: textQa } : undefined, errors: [], createdAt: nowIso(), updatedAt: nowIso() };
+    const run = { id: newId("run"), promptVersionId: promptSpecId, provider: textProvider.name, model: generated.model, inputSnapshot: context.snapshot.id, factSnapshotId: context.snapshot.id, output: content, latency: Date.now() - started, tokenUsage: totalTokenUsage, estimatedCost: 0, generationMethod: { type: needsProductionScript || needsCommercePlan ? "structured-generation" : "direct-generation", attempts: generationAttempts, structuredPresentation, notes: generationNotes }, errors: [], createdAt: nowIso(), updatedAt: nowIso() };
     this.repo.save("prompt_runs", run, { workspaceId: DEMO_WORKSPACE_ID, projectId, parentId: promptSpecId });
     return { artifact, run };
   }
@@ -814,6 +940,10 @@ export class CommerceService {
     const maxAttempts = needsTextFreeBase ? 2 : 1;
     let generated: Awaited<ReturnType<typeof providerRegistry.image.generate>> | undefined;
     let typographyQa: ImageTypographyQa | undefined;
+    let selectedGenerated: Awaited<ReturnType<typeof providerRegistry.image.generate>> | undefined;
+    let selectedTypographyQa: ImageTypographyQa | undefined;
+    let selectedCharacterCount = Number.POSITIVE_INFINITY;
+    let ocrWarning: string | undefined;
     let attempts = 0;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       attempts = attempt;
@@ -826,22 +956,25 @@ export class CommerceService {
         throw new CommerceError("IMAGE_GENERATION_FAILED", error instanceof Error ? error.message : "图片没有生成成功，请稍后重试。", 503);
       }
       const generationMetadata = generated.metadata as Record<string, unknown>;
-      if (!needsTextFreeBase || generationMetadata.externalGeneration !== true) break;
+      if (!needsTextFreeBase || generationMetadata.externalGeneration !== true) { selectedGenerated = generated; break; }
       try {
         typographyQa = await inspectTextFreeImage(generated.assetUri);
       } catch (error) {
-        throw new CommerceError("IMAGE_QA_FAILED", error instanceof Error ? `图片本地质检没有完成：${error.message}` : "图片本地质检没有完成，请稍后重试。", 503);
+        ocrWarning = error instanceof Error ? `底图文字检查未完成：${error.message}` : "底图文字检查未完成，建议人工查看。";
+        selectedGenerated = generated;
+        break;
+      }
+      const detectedCharacters = typographyQa.cjkCharacters + typographyQa.alphaNumericCharacters;
+      if (detectedCharacters < selectedCharacterCount) {
+        selectedGenerated = generated;
+        selectedTypographyQa = typographyQa;
+        selectedCharacterCount = detectedCharacters;
       }
       if (typographyQa.passed) break;
-      generated = undefined;
     }
-    if (!generated) {
-      throw new CommerceError("IMAGE_TYPOGRAPHY_REJECTED", `图片模型连续 ${attempts} 次在底图中生成了不可控文字，系统已拒绝交付。请更换描述或稍后重试。`, 422, {
-        attempts,
-        cjkCharacters: typographyQa?.cjkCharacters || 0,
-        alphaNumericCharacters: typographyQa?.alphaNumericCharacters || 0
-      });
-    }
+    generated = selectedGenerated ?? generated;
+    typographyQa = selectedTypographyQa ?? typographyQa;
+    if (!generated) throw new CommerceError("IMAGE_GENERATION_EMPTY", "图片模型没有返回可处理的图片文件，请稍后重试。", 503);
     const composed = await composeUsableProductImage(generated.assetUri, context).catch((error) => {
       throw new CommerceError("IMAGE_COMPOSITION_FAILED", error instanceof Error ? error.message : "商品图中文信息层合成失败，请稍后重试。", 503);
     });
@@ -859,11 +992,12 @@ export class CommerceService {
         outputMimeType: "image/png",
         overlayFields: composed.overlayFields,
         typographyQa: {
-          status: typographyQa?.passed === false ? "rejected" : typographyQa ? "passed" : "not-required",
+          status: typographyQa?.passed === false ? "visible-text-detected" : typographyQa ? "passed" : "not-checked",
           engine: typographyQa ? "tesseract-chi-sim-local" : "none",
           attempts,
           confidence: typographyQa?.confidence,
-          detectedCharacters: (typographyQa?.cjkCharacters || 0) + (typographyQa?.alphaNumericCharacters || 0)
+          detectedCharacters: (typographyQa?.cjkCharacters || 0) + (typographyQa?.alphaNumericCharacters || 0),
+          blocking: false
         }
       },
       production: {
@@ -874,11 +1008,11 @@ export class CommerceService {
         confirmedFacts: production.confirmedFacts,
         factSnapshotId: context.snapshot.id,
         referenceSourceId: referenceImages.length ? imageSource?.id : undefined,
-        warnings: creative
-          ? ["本次使用自由创作模式，没有把生成外观当作真实商品包装；具体品牌、规格、价格、功效和包装细节均待确认。", "底图已经过本地中文 OCR 检查，所有中文由程序使用内置 Noto 字体排版；图片可用于方向测试，定稿前请上传真实商品图并切换资料驱动模式。"]
+        warnings: [...(ocrWarning ? [ocrWarning] : []), ...(typographyQa?.passed === false ? ["底图检测到模型自带文字或类文字痕迹，已选择两次候选中干扰较少的一张；请人工查看后决定是否重新生成。"] : []), ...(creative
+          ? ["本次使用自由创作模式，没有把生成外观当作真实商品包装；具体品牌、规格、价格、功效和包装细节均待确认。", "中文信息由程序使用内置 Noto 字体排版；图片可用于方向测试，定稿前请上传真实商品图并切换资料驱动模式。"]
           : referenceImages.length
             ? ["已使用本项目上传的商品照片作为视觉参考；生成结果仍需人工对照包装。", "价格、规格、活动时间与 CTA 已由程序从确认事实中排版，不依赖图片模型拼写中文。"]
-            : ["没有找到可用的商品照片，本次是通用包装创意草稿，商品外观可能与实物不一致。", "价格、规格、活动时间与 CTA 已由程序从确认事实中排版，不依赖图片模型拼写中文。"]
+            : ["没有找到可用的商品照片，本次是通用包装创意草稿，商品外观可能与实物不一致。", "价格、规格、活动时间与 CTA 已由程序从确认事实中排版，不依赖图片模型拼写中文。"])]
       }
     });
     const artifact = this.createArtifact(projectId, "image", "AI 商品主图", content, context.snapshot.id, promptSpecId, { type: "platform-ai", id: providerRegistry.image.name });
@@ -886,8 +1020,8 @@ export class CommerceService {
       id: newId("run"), promptVersionId: promptSpecId, provider: providerRegistry.image.name, model,
       inputSnapshot: context.snapshot.id, factSnapshotId: context.snapshot.id,
       output: `已生成 1 张 1024×1024 图片，成果：${artifact.id}`, latency: Date.now() - started,
-      tokenUsage: 0, estimatedCost: 0, qualityScore: evaluatePrompt(context.spec, context.snapshot).total,
-      qualityGate: { type: "image-typography-v2", passed: typographyQa?.passed !== false, attempts, issues: [] as string[], metrics: typographyQa },
+      tokenUsage: 0, estimatedCost: 0,
+      generationMethod: { type: "image-generation-with-advisory-ocr", attempts, ocrStatus: typographyQa?.passed === false ? "visible-text-detected" : typographyQa ? "passed" : "not-checked" },
       errors: [], createdAt: nowIso(), updatedAt: nowIso()
     };
     this.repo.save("prompt_runs", run, { workspaceId: DEMO_WORKSPACE_ID, projectId, parentId: promptSpecId });
@@ -969,7 +1103,8 @@ export class CommerceService {
         ? "本次是自由创作模式：允许提出完整创意，但不得声称读取过资料；所有具体商品事实、数据、资质和功效默认写‘待确认’，并在报告中列出创意假设。"
         : "所有事实只能使用事实快照；缺失字段写‘待确认’，不要编造。";
       const bundleInstruction = `${compilePrompt(context)}\n\n你现在要一次完成整套电商内容生产。只返回一个严格 JSON 对象，不要 Markdown 代码围栏，不要省略字段。字段必须是：\n- proposal: 至少 650 个有效字符的完整可执行方案 Markdown，包含目标与 KPI、人群与平台判断、至少 3 条内容主线、第 1 天到第 7 天逐日动作、负责人/资源、复盘与止损、事实依据和待确认项\n- script: 15秒短视频完整脚本 Markdown，必须含 A/B/C 三个前 3 秒开场，以及至少 5 段从 0 秒覆盖到 15 秒的时间轴；每段含画面、动作、口播、屏幕文字、商品展示/证据，另列拍摄清单和待确认项\n- storyboard: 5项数组，每项含 index、role、headline、composition、overlay、evidence\n- imagePrompt: 可直接交给图片模型的完整中文/英文提示词 Markdown\n- videoStoryboard: 4到8项数组，每项含 start、end、shot、action、voice、overlay、evidence\n- caption: 目标平台可直接编辑使用的正文 Markdown\n- schedule: 7到14项数组，每项含 day、channel、content、metric、stopRule\n- report: 质量与合规报告 Markdown，逐项列证据、缺失和人工确认点\n${bundleFactRule}`;
-      let generated = await textProvider.generate(prompt.spec, bundleInstruction);
+      const bundleModelSpec = PromptSpecSchema.parse({ ...prompt.spec, outputFormat: "只返回严格 JSON 对象；字段用于拆分真实成果，不要 Markdown 代码围栏。" });
+      let generated = await textProvider.generate(bundleModelSpec, bundleInstruction);
       let campaign: { proposal: string; script: string; storyboard: unknown[]; imagePrompt: string; videoStoryboard: unknown[]; caption: string; schedule: unknown[]; report: string };
       if (generated.model === "mock-text-v1") {
         campaign = {
@@ -984,25 +1119,17 @@ export class CommerceService {
         };
       } else {
         const schema = z.object({
-          proposal: z.string().min(650), script: z.string().min(320), storyboard: z.array(z.record(z.string(), z.unknown())).min(5),
-          imagePrompt: z.string().min(80), videoStoryboard: z.array(z.record(z.string(), z.unknown())).min(4), caption: z.string().min(120),
-          schedule: z.array(z.record(z.string(), z.unknown())).min(7), report: z.string().min(180)
+          proposal: z.string().trim().min(1), script: z.string().trim().min(1), storyboard: z.array(z.record(z.string(), z.unknown())).min(1),
+          imagePrompt: z.string().trim().min(1), videoStoryboard: z.array(z.record(z.string(), z.unknown())).min(1), caption: z.string().trim().min(1),
+          schedule: z.array(z.record(z.string(), z.unknown())).min(1), report: z.string().trim().min(1)
         });
         const parseCampaign = (text: string) => schema.safeParse(JSON.parse(this.requireUsableJson(text, "整套活动")));
         let checked = parseCampaign(generated.text);
-        let campaignIssues = checked.success ? [
-          ...inspectCommercePlanArtifact(checked.data.proposal).issues.map((issue) => `方案：${issue}`),
-          ...inspectVideoScriptArtifact(checked.data.script, 15).issues.map((issue) => `脚本：${issue}`)
-        ] : ["整套 JSON 的字段、数量或正文长度不完整"];
-        if ((!checked.success || campaignIssues.length) && generated.model !== "mock-text-v1") {
-          generated = await textProvider.generate(prompt.spec, `${bundleInstruction}\n\n上一版没有通过整套成果验收：${campaignIssues.join("；")}。请完整重写整个 JSON，不能只补一个字段，也不要解释。`);
+        if (!checked.success && generated.model !== "mock-text-v1") {
+          generated = await textProvider.generate(bundleModelSpec, `${bundleInstruction}\n\n上一版无法按字段拆分。请保留有用内容，只修正为上述完整 JSON 对象；不要解释。\n\n<previous_draft>\n${generated.text.slice(0, 12_000)}\n</previous_draft>`);
           checked = parseCampaign(generated.text);
-          campaignIssues = checked.success ? [
-            ...inspectCommercePlanArtifact(checked.data.proposal).issues.map((issue) => `方案：${issue}`),
-            ...inspectVideoScriptArtifact(checked.data.script, 15).issues.map((issue) => `脚本：${issue}`)
-          ] : ["整套 JSON 的字段、数量或正文长度仍不完整"];
         }
-        if (!checked.success || campaignIssues.length) throw new CommerceError("CAMPAIGN_OUTPUT_INCOMPLETE", `真实模型连续两次没有返回可使用的整套成果：${campaignIssues.join("；")}。系统没有用固定模板补齐。`, 502, checked.success ? campaignIssues : checked.error.flatten());
+        if (!checked.success) throw new CommerceError("CAMPAIGN_OUTPUT_UNREADABLE", "真实模型返回的整套内容无法拆分为独立成果，请再次生成。这里检查的是必要文件结构，不评价内容好坏。", 502, checked.error.flatten());
         campaign = checked.data;
       }
 

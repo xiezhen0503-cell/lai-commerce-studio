@@ -82,7 +82,7 @@ pnpm build
 |---|---|---|
 | 项目、品牌、商品、资料上传、事实/快照、PromptSpec、物料版本、任务、审核、权限与审计 | 已真实实现，本地 SQLite 持久化 | 无 |
 | Web、REST、MCP Streamable HTTP、A2A 1.0、SSE、HMAC Webhook 示例 | 代码与本地运行态测试已真实实现；当前 Render 公网只开放 Web / REST | MCP、A2A 需配置独立公网服务地址 |
-| 中文文案生成 | OpenAI Responses API、OpenRouter 与 Pollinations Quest 文本模型均已实现；方案与脚本在保存前执行结构、长度、指标、排期和可执行性质量门，失败自动重写一次，生产真实模式禁止回退 Mock | 公网免费测试用 `POLLINATIONS_TEXT_API_KEY`；Codex 用 `OPENAI_API_KEY` |
+| 中文文案生成 | OpenAI Responses API、OpenRouter 与 Pollinations Quest 文本模型均已实现；方案与脚本采用结构化生成与确定性 Markdown 排版，字段没对齐时自动整理一次，但不会再用字数、章节数或动作数拒绝模型原文；生产真实模式禁止回退 Mock | 公网免费测试用 `POLLINATIONS_TEXT_API_KEY`；Codex 用 `OPENAI_API_KEY` |
 | 文档解析 | TXT/MD/CSV、PDF 文本层、DOCX、PPTX、XLSX 为服务端真实解析；图片在 OpenRouter 已配置时走视觉识别 | Office/PDF 无需 Key；图片识别使用 `OPENROUTER_API_KEY` |
 | 图片 | Pollinations 图片模型生成真实底图，Sharp 再按已确认事实渲染稳定中文图层；PNG 可预览、保存、版本化和下载 | `POLLINATIONS_API_KEY`；账户需有可用 Pollen |
 | 语音 | 未作为当前公开工作台功能开放 | 接入真实语音 Provider 后再开放 |

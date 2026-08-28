@@ -26,7 +26,7 @@ type WorkbenchResponse = {
     };
     result?: {
       artifact: { id: string; type: string; title: string; version: { content: string } };
-      run: { provider: string; model: string; qualityScore?: number };
+      run: { provider: string; model: string };
     };
     bundle?: { artifactIds?: string[]; provider?: string; model?: string };
   };
@@ -36,7 +36,6 @@ type WorkbenchResponse = {
 type Result = {
   title: string;
   content: string;
-  score: number;
   sources: string[];
   facts: string[];
   missing: string[];
@@ -242,7 +241,7 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
   async function generate() {
     if (!ready) return;
     setError(""); setResult(undefined); setCopied(false);
-    const fullObjective = `${objective.trim()}\n目标平台：${platforms.join("、")}`;
+    const fullObjective = `用户原始要求：\n${objective.trim()}\n\n任务类型：${selectedTask.label}\n目标平台：${platforms.join("、")}\n创作方式：${generationMode === "creative" ? "自由创作；具体商品事实统一待确认" : "资料驱动；只使用当前项目资料和已确认事实"}`;
     setStage(taskId === "bundle" ? "正在生成整套真实内容，可能需要 2 分钟" : taskId === "image" ? "正在生成真实图片，可能需要 1 分钟" : taskId === "video" ? "正在生成脚本与视频渲染配置" : "正在核对事实并生成");
     const response = await fetch("/api/v1/workbench/generate",{method:"POST",headers:{"content-type":"application/json","idempotency-key":`beginner-${Date.now()}`},body:JSON.stringify({projectId:initial.projectId,objective:fullObjective,task:taskId === "bundle" ? "bundle" : "single",artifactType:selectedTask.artifactType,generationMode})});
     const json = await response.json() as WorkbenchResponse;
@@ -253,12 +252,12 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
 
     if (taskId === "bundle" && json.data.bundle) {
       const model = String(json.data.bundle.model || initial.ai.model);
-      setResult({title:"整套真实成果已经生成",content:"方案、脚本、五张主图规划、真实商品图、图片提示词、视频分镜、可渲染 MP4、平台文案、排期和质量报告已经放进项目。价格、活动时间等高风险字段仍会等待你确认。",score:prompt.evaluation.total,sources:prompt.explanation.sources,facts:prompt.explanation.confirmedFacts,missing:prompt.explanation.missing,bundleCount:json.data.bundle.artifactIds?.length || 0,provider:String(json.data.bundle.provider || initial.ai.provider),model,live:model!=="mock-text-v1",generationMode,skills:activeSkills});
+      setResult({title:"整套真实成果已经生成",content:"方案、脚本、五张主图规划、真实商品图、图片提示词、视频分镜、可渲染 MP4、平台文案、排期和质量报告已经放进项目。价格、活动时间等高风险字段仍会等待你确认。",sources:prompt.explanation.sources,facts:prompt.explanation.confirmedFacts,missing:prompt.explanation.missing,bundleCount:json.data.bundle.artifactIds?.length || 0,provider:String(json.data.bundle.provider || initial.ai.provider),model,live:model!=="mock-text-v1",generationMode,skills:activeSkills});
     } else {
       const generated = json.data.result;
       if (!generated) { setError("内容没有生成成功，请再试一次"); return; }
       const image = generated.artifact.type === "image" ? imageResult(generated.artifact.version.content) : undefined;
-      setResult({title:generated.artifact.title,content:generated.artifact.version.content,score:generated.run.qualityScore ?? prompt.evaluation.total,sources:prompt.explanation.sources,facts:prompt.explanation.confirmedFacts,missing:prompt.explanation.missing,artifactId:generated.artifact.id,provider:generated.run.provider,model:generated.run.model,live:generated.run.model!=="mock-text-v1"&&generated.run.model!=="deterministic-storyboard-svg-v1",image,video:generated.artifact.type==="video",generationMode,skills:activeSkills});
+      setResult({title:generated.artifact.title,content:generated.artifact.version.content,sources:prompt.explanation.sources,facts:prompt.explanation.confirmedFacts,missing:prompt.explanation.missing,artifactId:generated.artifact.id,provider:generated.run.provider,model:generated.run.model,live:generated.run.model!=="mock-text-v1"&&generated.run.model!=="deterministic-storyboard-svg-v1",image,video:generated.artifact.type==="video",generationMode,skills:activeSkills});
     }
     setTimeout(() => resultRef.current?.scrollIntoView({behavior:"smooth",block:"start"}),50);
   }
@@ -321,9 +320,9 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
         <div className={styles.sectionLabel}><span>发到哪里</span><small>可以多选</small></div>
         <div className={styles.platforms}>{["小红书","抖音","微信私域","淘宝 / 天猫","京东"].map((platform) => <button type="button" key={platform} aria-pressed={platforms.includes(platform)} className={platforms.includes(platform)?styles.platformSelected:""} onClick={() => togglePlatform(platform)}>{platforms.includes(platform)&&<Check size={12}/>} {platform}</button>)}</div>
 
-        <label className={styles.promptLabel} htmlFor="beginner-objective"><span>用一句话说说你的要求</span><small>{objective.length}/240</small></label>
+        <label className={styles.promptLabel} htmlFor="beginner-objective"><span>详细说说你的要求</span><small>{objective.length}/2000</small></label>
         <div className={styles.promptBox}>
-          <textarea id="beginner-objective" maxLength={240} value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="例如：写一条 30 秒短视频脚本，开头抓人，但不要夸大功效"/>
+          <textarea id="beginner-objective" maxLength={2000} value={objective} onChange={(event) => setObjective(event.target.value)} placeholder={"不用写专业提示词。可以分行写：\n想达到什么目标、卖给谁、发到哪里、预算和时间、必须包含什么、坚决不要什么。"}/>
           <div className={styles.promptFooter}><div><Sparkles size={13}/><span>{generationMode === "creative" ? creativeProviderHint(initial.ai.mode) : sourceCount > 0 ? providerHint(initial.ai.mode) : "资料驱动需要先上传至少一份资料"}</span></div><button type="button" onClick={generate} disabled={!ready || Boolean(stage)}>{stage?<LoaderCircle className={styles.spin} size={16}/>:<ArrowRight size={16}/>} {stage || (generationMode === "creative" || sourceCount > 0 ? "帮我生成第一版" : "先上传资料")}</button></div>
         </div>
         {error && <div className={styles.error} role="alert">{error}</div>}
@@ -332,9 +331,9 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
     </section>
 
     {result && <section className={styles.result} ref={resultRef} aria-live="polite">
-      <div className={styles.resultHead}><div><div className={styles.resultEyebrow}><Check size={13}/> 第一版已完成</div><h2>{result.title}</h2><p>{result.bundleCount ? `共整理 ${result.bundleCount} 项内容，已放入当前项目。` : result.image ? "真实图片底图已经过文字质检，中文由程序使用内置字体排版，可预览和下载原图。" : selectedTask.id === "script" ? "时间轴、画面、口播、字幕、开场版本和拍摄清单已经过完整性检查。" : "你可以直接复制，也可以进入完整工作台继续修改。"}</p></div><div className={styles.score}><strong>{result.score}</strong><span>成果质量分</span></div></div>
+      <div className={styles.resultHead}><div><div className={styles.resultEyebrow}><Check size={13}/> 第一版已完成</div><h2>{result.title}</h2><p>{result.bundleCount ? `共整理 ${result.bundleCount} 项内容，已放入当前项目。` : result.image ? "图片已使用内置中文字体完成信息排版，可预览和下载原图。" : selectedTask.id === "script" ? "模型内容已按开场、镜头、口播、字幕、素材和待确认项排版，仍可继续人工修改。" : "模型内容已按任务结构排版，你可以直接复制，也可以进入完整工作台继续修改。"}</p></div></div>
       <div className={styles.resultBody}>
-        <article className={styles.output}><div className={styles.outputToolbar}><div className={styles.outputIdentity}><span>{selectedTask.label}</span><small><Bot size={12}/>{providerDisplayName(result.provider, result.live)} · {result.model}</small></div><div className={styles.outputActions}><a className={styles.downloadLink} download href={result.artifactId?`/api/v1/artifacts/${result.artifactId}/export${result.video?"?format=mp4":""}`:`/api/v1/projects/${initial.projectId}/export`}><Download size={13}/>{result.bundleCount?"下载全部":result.image?"下载原图":result.video?"下载 MP4":"下载结果"}</a>{!result.image&&!result.video&&<button type="button" onClick={copyResult}><Clipboard size={13}/>{copied?"已复制":"复制结果"}</button>}</div></div>{result.image?<div className={styles.generatedImage}><img src={result.image.assetUri} alt="AI 生成并完成中文信息排版的商品主图"/><div className={styles.imageNotes}><p><ShieldCheck size={13}/>中文字体：{result.image.overlayFont||"Noto Sans SC"}；底图文字检查：{result.image.typographyQa==="passed"?"本地 OCR 已通过":"无需检查"}</p>{result.image.warnings.map((warning)=><p key={warning}><ShieldCheck size={13}/>{warning}</p>)}<details><summary>查看本次图片提示词</summary><pre>{result.image.prompt}</pre></details></div></div>:result.video&&result.artifactId?<div className={styles.generatedImage}><video controls playsInline preload="metadata" src={`/api/v1/artifacts/${result.artifactId}/export?format=mp4&inline=1`} style={{width:"100%",maxHeight:620,background:"#111",borderRadius:16}}/><div className={styles.imageNotes}><p><ShieldCheck size={13}/>服务器已完成真实 MP4 渲染和文件完整性检查，可直接播放或下载。</p><p><Download size={13}/><a download href={`/api/v1/artifacts/${result.artifactId}/export?format=srt`}>下载 SRT 字幕</a> · <a download href={`/api/v1/artifacts/${result.artifactId}/export?format=png`}>下载 PNG 封面</a></p></div></div>:<MarkdownArtifact content={result.content}/>}</article>
+        <article className={styles.output}><div className={styles.outputToolbar}><div className={styles.outputIdentity}><span>{selectedTask.label}</span><small><Bot size={12}/>{providerDisplayName(result.provider, result.live)} · {result.model}</small></div><div className={styles.outputActions}><a className={styles.downloadLink} download href={result.artifactId?`/api/v1/artifacts/${result.artifactId}/export${result.video?"?format=mp4":""}`:`/api/v1/projects/${initial.projectId}/export`}><Download size={13}/>{result.bundleCount?"下载全部":result.image?"下载原图":result.video?"下载 MP4":"下载结果"}</a>{!result.image&&!result.video&&<button type="button" onClick={copyResult}><Clipboard size={13}/>{copied?"已复制":"复制结果"}</button>}</div></div>{result.image?<div className={styles.generatedImage}><img src={result.image.assetUri} alt="AI 生成并完成中文信息排版的商品主图"/><div className={styles.imageNotes}><p><ShieldCheck size={13}/>中文字体：{result.image.overlayFont||"Noto Sans SC"}；辅助 OCR：{result.image.typographyQa==="passed"?"未发现明显模型文字":result.image.typographyQa==="visible-text-detected"?"发现文字痕迹，请人工查看":"未执行"}</p>{result.image.warnings.map((warning)=><p key={warning}><ShieldCheck size={13}/>{warning}</p>)}<details><summary>查看本次图片提示词</summary><pre>{result.image.prompt}</pre></details></div></div>:result.video&&result.artifactId?<div className={styles.generatedImage}><video controls playsInline preload="metadata" src={`/api/v1/artifacts/${result.artifactId}/export?format=mp4&inline=1`} style={{width:"100%",maxHeight:620,background:"#111",borderRadius:16}}/><div className={styles.imageNotes}><p><ShieldCheck size={13}/>服务器已完成真实 MP4 渲染和文件完整性检查，可直接播放或下载。</p><p><Download size={13}/><a download href={`/api/v1/artifacts/${result.artifactId}/export?format=srt`}>下载 SRT 字幕</a> · <a download href={`/api/v1/artifacts/${result.artifactId}/export?format=png`}>下载 PNG 封面</a></p></div></div>:<MarkdownArtifact content={result.content}/>}</article>
         <aside className={styles.evidence}><h3>AI 这次依据了什么</h3><div className={styles.evidenceRow}><span>创作方式</span><strong>{result.generationMode === "creative" ? "自由创作" : "资料驱动"}</strong></div><div className={styles.evidenceRow}><span>当前模型</span><strong>{providerDisplayName(result.provider, result.live)}</strong></div><div className={styles.evidenceRow}><span>专业技能</span><strong>{result.skills.length} 个</strong></div><div className={styles.evidenceRow}><span>已确认事实</span><strong>{result.facts.length} 条</strong></div><div className={styles.evidenceRow}><span>引用资料</span><strong>{result.sources.length} 份</strong></div><div className={styles.evidenceRow}><span>待确认</span><strong>{result.missing.length} 项</strong></div>{result.skills.length>0&&<div className={styles.skillList}>{result.skills.join(" · ")}</div>}{result.missing.length>0&&<div className={styles.missingBox}>{result.missing.join("；")}</div>}<Link className={styles.projectLink} href={`/projects/${initial.projectId}`}>打开完整项目 <ChevronRight size={13}/></Link></aside>
       </div>
     </section>}
