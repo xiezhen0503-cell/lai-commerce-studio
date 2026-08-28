@@ -171,7 +171,13 @@ describe("安全、权限和 Provider", () => {
     expect(body).toMatchObject({ model: "klein", size: "1024x1024", response_format: "b64_json", image: ["data:image/png;base64,iVBORw0KGgo="] });
     expect(generated.assetUri).toBe(`data:image/png;base64,${png.toString("base64")}`);
     expect(generated.metadata).toMatchObject({ externalGeneration: true, referenceImageCount: 1 });
-    expect(getImageProviderStatus()).toMatchObject({ mode: "pollinations", live: true, model: "zimage" });
+    expect(getImageProviderStatus()).toMatchObject({
+      mode: "pollinations",
+      live: true,
+      model: "zimage",
+      pipelineVersion: "image-v2-font-ocr",
+      typography: { overlayFont: "Noto Sans SC", qualityGate: "local-chi-sim-ocr", maxAttempts: 2 }
+    });
   });
 
   it("用专属链接 Token 保护公开工作台，但本地默认不阻断", () => {

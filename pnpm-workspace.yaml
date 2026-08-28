@@ -8,3 +8,5 @@ allowBuilds:
   better-sqlite3: true
   esbuild: true
   sharp: true
+  # tesseract.js 的 postinstall 仅显示 OpenCollective 提示，不影响 OCR 运行；跨平台环境中明确跳过。
+  tesseract.js: false

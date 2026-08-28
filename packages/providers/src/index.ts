@@ -5,6 +5,8 @@ import JSZip from "jszip";
 import mammoth from "mammoth";
 import { extractText, getDocumentProxy } from "unpdf";
 
+export const IMAGE_PIPELINE_VERSION = "image-v2-font-ocr";
+
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const DEFAULT_OPENAI_MODEL = "gpt-5.6-sol";
@@ -592,7 +594,9 @@ export function getImageProviderStatus() {
     configured: Boolean(process.env.POLLINATIONS_API_KEY?.trim()),
     live: Boolean(process.env.POLLINATIONS_API_KEY?.trim()),
     externalGeneration: true,
-    authenticated: Boolean(process.env.POLLINATIONS_API_KEY?.trim())
+    authenticated: Boolean(process.env.POLLINATIONS_API_KEY?.trim()),
+    pipelineVersion: IMAGE_PIPELINE_VERSION,
+    typography: { overlayFont: "Noto Sans SC", qualityGate: "local-chi-sim-ocr", maxAttempts: 2 }
   };
   return {
     mode: "deterministic" as const,
@@ -601,7 +605,9 @@ export function getImageProviderStatus() {
     configured: true,
     live: false,
     externalGeneration: false,
-    authenticated: false
+    authenticated: false,
+    pipelineVersion: IMAGE_PIPELINE_VERSION,
+    typography: { overlayFont: "Noto Sans SC", qualityGate: "not-required", maxAttempts: 1 }
   };
 }
 

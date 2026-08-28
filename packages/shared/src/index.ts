@@ -1,12 +1,15 @@
 import crypto from "node:crypto";
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
+import { createRequire } from "node:module";
+import path from "node:path";
 import sharp from "sharp";
 import type { AgentHandoff, Artifact, ArtifactVersion, BrandProfile, CampaignBundleResult, Fact, FactSnapshot, GenerationJob, Product, Project, PromptGenerationResult, PromptSpec, Scope, SourceDocument } from "@lai/domain";
 import { AgentHandoffSchema, ArtifactTypeSchema as ArtifactTypeValidator, FactSchema, ProjectSchema, PromptSpecSchema, newId, nowIso } from "@lai/domain";
 import { getRepository, type CommerceRepository } from "@lai/database";
 import { authorize, defaultAgentPrincipal, type AgentPrincipal } from "@lai/permissions";
 import { buildPromptVariants, compilePrompt, evaluatePrompt, generationModeFor, retrieveSourceExcerpts, type CompileContext, type GenerationMode } from "@lai/prompt-engine";
-import { providerRegistry } from "@lai/providers";
+import { IMAGE_PIPELINE_VERSION, providerRegistry } from "@lai/providers";
 import { createAgentToken, hashToken, redact, signWebhook } from "@lai/security";
 import { z } from "zod";
 
@@ -22,9 +25,87 @@ export class CommerceError extends Error {
   constructor(public code: string, message: string, public status = 400, public details?: unknown) { super(message); }
 }
 
+type LocalOcrWorker = {
+  recognize(image: Buffer): Promise<{ data: { text?: string; confidence?: number } }>;
+  terminate(): Promise<void>;
+};
+
+export type ImageTypographyQa = {
+  passed: boolean;
+  recognizedText: string;
+  confidence: number;
+  cjkCharacters: number;
+  alphaNumericCharacters: number;
+};
+
+let sharedPackageRequire: NodeJS.Require | undefined;
+
+function requireFromSharedPackage() {
+  if (sharedPackageRequire) return sharedPackageRequire;
+  const candidates = [
+    path.resolve(process.cwd(), "packages/shared/package.json"),
+    path.resolve(process.cwd(), "../../packages/shared/package.json")
+  ];
+  const packageJson = candidates.find((candidate) => existsSync(candidate));
+  if (!packageJson) throw new Error("图片生产依赖目录不存在，无法加载中文字体与本地质检器。");
+  sharedPackageRequire = createRequire(packageJson);
+  return sharedPackageRequire;
+}
+
+function bundledChineseFontPath() {
+  return requireFromSharedPackage().resolve("@expo-google-fonts/noto-sans-sc/400Regular/NotoSansSC_400Regular.ttf");
+}
+
+async function createLocalChineseOcrWorker(): Promise<LocalOcrWorker> {
+  const packageRequire = requireFromSharedPackage();
+  const { createWorker } = packageRequire("tesseract.js") as {
+    createWorker: (language: string, oem: number, options: Record<string, unknown>) => Promise<LocalOcrWorker>;
+  };
+  const language = packageRequire("@tesseract.js-data/chi_sim") as { code: string; gzip: boolean; langPath: string };
+  return createWorker(language.code, 1, {
+    langPath: language.langPath,
+    gzip: language.gzip,
+    cacheMethod: "none"
+  });
+}
+
+function dataImageBytes(assetUri: string) {
+  const match = assetUri.match(/^data:image\/(?:png|jpe?g|webp|svg\+xml);base64,(.+)$/i);
+  if (!match?.[1]) throw new Error("图片文件无法进入本地质量检查。");
+  return Buffer.from(match[1], "base64");
+}
+
+export async function inspectTextFreeImage(assetUri: string): Promise<ImageTypographyQa> {
+  const prepared = await sharp(dataImageBytes(assetUri))
+    .rotate()
+    .resize({ width: 768, height: 768, fit: "inside", withoutEnlargement: true })
+    .flatten({ background: "#ffffff" })
+    .grayscale()
+    .normalize()
+    .png()
+    .toBuffer();
+  const worker = await createLocalChineseOcrWorker();
+  try {
+    const result = await worker.recognize(prepared);
+    const recognizedText = String(result.data.text || "").replace(/\s+/g, " ").trim().slice(0, 240);
+    const cjkCharacters = (recognizedText.match(/[\u3400-\u9fff]/g) || []).length;
+    const alphaNumericCharacters = (recognizedText.match(/[A-Za-z0-9]/g) || []).length;
+    const confidence = Number.isFinite(result.data.confidence) ? Number(result.data.confidence) : 0;
+    return {
+      passed: cjkCharacters < 2 && alphaNumericCharacters < 4,
+      recognizedText,
+      confidence,
+      cjkCharacters,
+      alphaNumericCharacters
+    };
+  } finally {
+    await worker.terminate();
+  }
+}
+
 const checksumFacts = (facts: Fact[]) => crypto.createHash("sha256").update(JSON.stringify(facts.map((fact) => ({ id: fact.id, value: fact.value, status: fact.status, updatedAt: fact.updatedAt })))).digest("hex");
 
-function buildGroundedImagePrompt(context: CompileContext, referenceImageUsed: boolean) {
+export function buildGroundedImagePrompt(context: CompileContext, referenceImageUsed: boolean) {
   const product = context.products[0]!;
   const creative = generationModeFor(context.spec) === "creative";
   const confirmedFacts = (creative ? [] : context.snapshot.facts)
@@ -34,9 +115,12 @@ function buildGroundedImagePrompt(context: CompileContext, referenceImageUsed: b
   const visualReferenceRule = referenceImageUsed
     ? "Use the supplied product photo as the visual reference. Preserve the product shape, package proportions, colors, logo placement and visible label layout. Do not replace or redesign the product."
     : "No usable product photo was supplied. Create a clearly generic packaging concept for a creative draft; do not invent a real trademark, certification mark, label copy or exact package detail.";
-  const prompt = `Create one square Chinese ecommerce hero image as a commercial creative draft.
+  const typographyRule = referenceImageUsed
+    ? "Preserve only the text and label marks already visible in the supplied product photo. Add no new headline, slogan, price, number, seal, watermark, platform logo or pseudo-text; the application will add accurate campaign typography later."
+    : "CRITICAL ZERO-TEXT RULE: render absolutely no words, letters, numbers, Chinese characters, calligraphy, seals, logos, captions, labels, watermarks or pseudo-text anywhere in the image. Keep every visible package face blank and unprinted. Do not reproduce text from the user objective; the application will add all accurate Chinese typography later with a bundled font.";
+  const prompt = `Create one square commercial product photography background plate. This is a photograph, not a poster, advertisement layout, packaging design sheet or typography composition.
 
-USER OBJECTIVE
+USER OBJECTIVE — interpret its visual meaning only; never copy or render any words from it
 ${context.spec.objective}
 
 PRODUCT CONTEXT
@@ -49,11 +133,11 @@ Confirmed facts only:
 ${confirmedFacts.length ? confirmedFacts.map((item) => `- ${item}`).join("\n") : "- No confirmed product facts; keep all concrete package details generic."}
 
 VISUAL DIRECTION
-- Photorealistic commercial product photography, clean composition, believable lighting, clear focal product, generous safe space for later deterministic Chinese typography.
+- Photorealistic commercial product photography, clean composition, believable lighting and one clear focal product.
 - Follow this user request and the confirmed facts. Treat any missing fact as missing.
 - ${visualReferenceRule}
-- Do not render price, discount, sales figures, ingredients, specifications, dates, certifications, medical effects, nutrition claims, or other factual Chinese copy inside the image.
-- No watermark, no platform logo, no illegible pseudo-text, no duplicated package, no deformed container, no extra fingers or hands.
+- ${typographyRule}
+- No poster headline, no advertising slogan, no platform logo, no duplicated package, no deformed container, no extra fingers or hands.
 - Avoid these claims or expressions: ${[...context.brand.bannedWords, ...product.prohibitedClaims].join(", ") || "none"}.
 
 Return the image only.`;
@@ -64,11 +148,30 @@ function escapeSvgText(value: string) {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }
 
+export async function renderChineseTextLayer(input: { text: string; width: number; height: number; fontSize: number; color: string; align?: "left" | "center" | "right"; weight?: number }) {
+  const color = /^#[0-9a-f]{6}$/i.test(input.color) ? input.color : "#ffffff";
+  const weight = Math.min(900, Math.max(100, input.weight || 500));
+  const layer = await sharp({
+    text: {
+      text: `<span foreground="${color}" font_weight="${weight}">${escapeSvgText(input.text)}</span>`,
+      font: `Noto Sans SC ${input.fontSize}`,
+      fontfile: bundledChineseFontPath(),
+      width: input.width,
+      height: input.height,
+      align: input.align || "left",
+      rgba: true
+    }
+  }).png().toBuffer();
+  const metadata = await sharp(layer).metadata();
+  if (!metadata.width || !metadata.height) throw new Error("中文信息层没有生成有效像素。");
+  return layer;
+}
+
 function confirmedFactValue(context: CompileContext, names: string[]) {
   return context.snapshot.facts.find((fact) => names.includes(fact.type) && ["verified", "user-confirmed"].includes(fact.status) && fact.value)?.value;
 }
 
-async function composeUsableProductImage(assetUri: string, context: CompileContext) {
+export async function composeUsableProductImage(assetUri: string, context: CompileContext) {
   const match = assetUri.match(/^data:(image\/(?:png|jpe?g|webp|svg\+xml));base64,(.+)$/i);
   if (!match?.[2]) throw new Error("图片模型返回的文件无法进入确定性排版，请重新生成。");
   const product = context.products[0]!;
@@ -81,20 +184,31 @@ async function composeUsableProductImage(assetUri: string, context: CompileConte
   const safeColor = /^#[0-9a-f]{6}$/i.test(context.brand.colors[0] || "") ? context.brand.colors[0]! : "#242064";
   const accent = /^#[0-9a-f]{6}$/i.test(context.brand.colors[1] || "") ? context.brand.colors[1]! : "#a9f0d2";
   const detailLines = creative ? ["具体商品信息待确认"] : [specification && `规格：${specification}`, price && `活动价：${price}`, date && `活动时间：${date}`].filter(Boolean) as string[];
-  const lineMarkup = detailLines.slice(0, 3).map((line, index) => `<text x="70" y="${790 + index * 46}" fill="#ffffff" font-size="28" font-weight="600">${escapeSvgText(line)}</text>`).join("");
   const overlay = Buffer.from(`<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
     <defs><linearGradient id="fade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${safeColor}" stop-opacity="0"/><stop offset="0.38" stop-color="${safeColor}" stop-opacity="0.86"/><stop offset="1" stop-color="${safeColor}" stop-opacity="0.98"/></linearGradient></defs>
     <rect x="0" y="610" width="1024" height="414" fill="url(#fade)"/>
-    <rect x="70" y="695" width="160" height="42" rx="21" fill="${accent}"/><text x="150" y="724" text-anchor="middle" fill="${safeColor}" font-size="22" font-weight="700">${escapeSvgText(brandName)}</text>
-    <text x="70" y="776" fill="#ffffff" font-size="44" font-weight="800">${escapeSvgText(productName.slice(0, 20))}</text>
-    ${lineMarkup}
-    <text x="70" y="966" fill="#ffffff" font-size="24" font-weight="650">${escapeSvgText(context.brand.ctas[0] || "查看商品详情")}</text>
+    <rect x="70" y="695" width="178" height="44" rx="22" fill="${accent}"/>
     <rect x="52" y="52" width="920" height="920" rx="30" fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="2" stroke-dasharray="12 10"/>
   </svg>`);
-  const bytes = await sharp(Buffer.from(match[2], "base64")).resize(1024, 1024, { fit: "cover" }).composite([{ input: overlay, top: 0, left: 0 }]).png({ quality: 92, compressionLevel: 8 }).toBuffer();
+  const brandLayer = await renderChineseTextLayer({ text: brandName, width: 162, height: 38, fontSize: 21, color: safeColor, align: "center", weight: 700 });
+  const productLayer = await renderChineseTextLayer({ text: productName.slice(0, 20), width: 884, height: 64, fontSize: 44, color: "#ffffff", weight: 800 });
+  const detailLayers = await Promise.all(detailLines.slice(0, 3).map((line) => renderChineseTextLayer({ text: line, width: 884, height: 42, fontSize: 28, color: "#ffffff", weight: 600 })));
+  const ctaLayer = await renderChineseTextLayer({ text: context.brand.ctas[0] || "查看商品详情", width: 884, height: 40, fontSize: 24, color: "#ffffff", weight: 600 });
+  const textComposites = [
+    { input: brandLayer, top: 698, left: 78 },
+    { input: productLayer, top: 742, left: 70 },
+    ...detailLayers.map((input, index) => ({ input, top: 790 + index * 46, left: 70 })),
+    { input: ctaLayer, top: 938, left: 70 }
+  ];
+  const bytes = await sharp(Buffer.from(match[2], "base64"))
+    .resize(1024, 1024, { fit: "cover" })
+    .composite([{ input: overlay, top: 0, left: 0 }, ...textComposites])
+    .png({ quality: 92, compressionLevel: 8 })
+    .toBuffer();
   return {
     assetUri: `data:image/png;base64,${bytes.toString("base64")}`,
-    overlayFields: { brandName, productName, specification, price, date, cta: context.brand.ctas[0] || "查看商品详情" }
+    overlayFields: { brandName, productName, specification, price, date, cta: context.brand.ctas[0] || "查看商品详情" },
+    overlayFont: "Noto Sans SC 400 (bundled OFL-1.1)"
   };
 }
 
@@ -525,11 +639,37 @@ export class CommerceService {
       }
     }
     const production = buildGroundedImagePrompt(context, referenceImages.length > 0);
-    let generated;
-    try {
-      generated = await providerRegistry.image.generate({ prompt: production.prompt, width: 1024, height: 1024, referenceImages });
-    } catch (error) {
-      throw new CommerceError("IMAGE_GENERATION_FAILED", error instanceof Error ? error.message : "图片没有生成成功，请稍后重试。", 503);
+    const needsTextFreeBase = creative || referenceImages.length === 0;
+    const maxAttempts = needsTextFreeBase ? 2 : 1;
+    let generated: Awaited<ReturnType<typeof providerRegistry.image.generate>> | undefined;
+    let typographyQa: ImageTypographyQa | undefined;
+    let attempts = 0;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      attempts = attempt;
+      const correction = attempt > 1
+        ? "\n\nCORRECTION REQUIRED: the previous candidate contained visible typography. Regenerate the photograph from scratch with completely blank package surfaces and zero text-like marks."
+        : "";
+      try {
+        generated = await providerRegistry.image.generate({ prompt: `${production.prompt}${correction}`, width: 1024, height: 1024, referenceImages });
+      } catch (error) {
+        throw new CommerceError("IMAGE_GENERATION_FAILED", error instanceof Error ? error.message : "图片没有生成成功，请稍后重试。", 503);
+      }
+      const generationMetadata = generated.metadata as Record<string, unknown>;
+      if (!needsTextFreeBase || generationMetadata.externalGeneration !== true) break;
+      try {
+        typographyQa = await inspectTextFreeImage(generated.assetUri);
+      } catch (error) {
+        throw new CommerceError("IMAGE_QA_FAILED", error instanceof Error ? `图片本地质检没有完成：${error.message}` : "图片本地质检没有完成，请稍后重试。", 503);
+      }
+      if (typographyQa.passed) break;
+      generated = undefined;
+    }
+    if (!generated) {
+      throw new CommerceError("IMAGE_TYPOGRAPHY_REJECTED", `图片模型连续 ${attempts} 次在底图中生成了不可控文字，系统已拒绝交付。请更换描述或稍后重试。`, 422, {
+        attempts,
+        cjkCharacters: typographyQa?.cjkCharacters || 0,
+        alphaNumericCharacters: typographyQa?.alphaNumericCharacters || 0
+      });
     }
     const composed = await composeUsableProductImage(generated.assetUri, context).catch((error) => {
       throw new CommerceError("IMAGE_COMPOSITION_FAILED", error instanceof Error ? error.message : "商品图中文信息层合成失败，请稍后重试。", 503);
@@ -539,7 +679,22 @@ export class CommerceService {
     const content = JSON.stringify({
       assetUri: composed.assetUri,
       rawAssetUri: generated.assetUri,
-      metadata: { ...generated.metadata, deterministicOverlay: true, outputMimeType: "image/png", overlayFields: composed.overlayFields },
+      metadata: {
+        ...generated.metadata,
+        imagePipelineVersion: IMAGE_PIPELINE_VERSION,
+        usableCommercialDraft: true,
+        deterministicOverlay: true,
+        overlayFont: composed.overlayFont,
+        outputMimeType: "image/png",
+        overlayFields: composed.overlayFields,
+        typographyQa: {
+          status: typographyQa?.passed === false ? "rejected" : typographyQa ? "passed" : "not-required",
+          engine: typographyQa ? "tesseract-chi-sim-local" : "none",
+          attempts,
+          confidence: typographyQa?.confidence,
+          detectedCharacters: (typographyQa?.cjkCharacters || 0) + (typographyQa?.alphaNumericCharacters || 0)
+        }
+      },
       production: {
         prompt: production.prompt,
         userObjective: context.spec.objective,
@@ -549,7 +704,7 @@ export class CommerceService {
         factSnapshotId: context.snapshot.id,
         referenceSourceId: referenceImages.length ? imageSource?.id : undefined,
         warnings: creative
-          ? ["本次使用自由创作模式，没有把生成外观当作真实商品包装；具体品牌、规格、价格、功效和包装细节均待确认。", "图片可用于方向测试，定稿前请上传真实商品图并切换资料驱动模式。"]
+          ? ["本次使用自由创作模式，没有把生成外观当作真实商品包装；具体品牌、规格、价格、功效和包装细节均待确认。", "底图已经过本地中文 OCR 检查，所有中文由程序使用内置 Noto 字体排版；图片可用于方向测试，定稿前请上传真实商品图并切换资料驱动模式。"]
           : referenceImages.length
             ? ["已使用本项目上传的商品照片作为视觉参考；生成结果仍需人工对照包装。", "价格、规格、活动时间与 CTA 已由程序从确认事实中排版，不依赖图片模型拼写中文。"]
             : ["没有找到可用的商品照片，本次是通用包装创意草稿，商品外观可能与实物不一致。", "价格、规格、活动时间与 CTA 已由程序从确认事实中排版，不依赖图片模型拼写中文。"]

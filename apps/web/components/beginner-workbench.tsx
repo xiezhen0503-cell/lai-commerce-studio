@@ -53,6 +53,8 @@ type Result = {
     prompt: string;
     warnings: string[];
     referenceSourceId?: string;
+    overlayFont?: string;
+    typographyQa?: string;
   };
 };
 
@@ -74,6 +76,7 @@ function imageResult(content: string) {
   try {
     const parsed = JSON.parse(content) as {
       assetUri?: unknown;
+      metadata?: { overlayFont?: unknown; typographyQa?: { status?: unknown } };
       production?: { prompt?: unknown; warnings?: unknown; referenceSourceId?: unknown };
     };
     if (typeof parsed.assetUri !== "string" || !parsed.assetUri.startsWith("data:image/")) return undefined;
@@ -81,7 +84,9 @@ function imageResult(content: string) {
       assetUri: parsed.assetUri,
       prompt: typeof parsed.production?.prompt === "string" ? parsed.production.prompt : "",
       warnings: Array.isArray(parsed.production?.warnings) ? parsed.production.warnings.filter((item): item is string => typeof item === "string") : [],
-      referenceSourceId: typeof parsed.production?.referenceSourceId === "string" ? parsed.production.referenceSourceId : undefined
+      referenceSourceId: typeof parsed.production?.referenceSourceId === "string" ? parsed.production.referenceSourceId : undefined,
+      overlayFont: typeof parsed.metadata?.overlayFont === "string" ? parsed.metadata.overlayFont : undefined,
+      typographyQa: typeof parsed.metadata?.typographyQa?.status === "string" ? parsed.metadata.typographyQa.status : undefined
     };
   } catch {
     return undefined;
@@ -261,9 +266,9 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
     </section>
 
     {result && <section className={styles.result} ref={resultRef} aria-live="polite">
-      <div className={styles.resultHead}><div><div className={styles.resultEyebrow}><Check size={13}/> 第一版已完成</div><h2>{result.title}</h2><p>{result.bundleCount ? `共整理 ${result.bundleCount} 项内容，已放入当前项目。` : result.image ? "这是真实图片模型返回的图片草稿，可直接预览和下载原图。" : "你可以直接复制，也可以进入完整工作台继续修改。"}</p></div><div className={styles.score}><strong>{result.score}</strong><span>任务完整度</span></div></div>
+      <div className={styles.resultHead}><div><div className={styles.resultEyebrow}><Check size={13}/> 第一版已完成</div><h2>{result.title}</h2><p>{result.bundleCount ? `共整理 ${result.bundleCount} 项内容，已放入当前项目。` : result.image ? "真实图片底图已经过文字质检，中文由程序使用内置字体排版，可预览和下载原图。" : "你可以直接复制，也可以进入完整工作台继续修改。"}</p></div><div className={styles.score}><strong>{result.score}</strong><span>任务完整度</span></div></div>
       <div className={styles.resultBody}>
-        <article className={styles.output}><div className={styles.outputToolbar}><div className={styles.outputIdentity}><span>{selectedTask.label}</span><small><Bot size={12}/>{providerDisplayName(result.provider, result.live)} · {result.model}</small></div><div className={styles.outputActions}><a className={styles.downloadLink} href={result.artifactId?`/api/v1/artifacts/${result.artifactId}/export`:`/api/v1/projects/${initial.projectId}/export`}><Download size={13}/>{result.bundleCount?"下载全部":result.image?"下载原图":result.video?"下载 MP4":"下载结果"}</a>{!result.image&&!result.video&&<button type="button" onClick={copyResult}><Clipboard size={13}/>{copied?"已复制":"复制结果"}</button>}</div></div>{result.image?<div className={styles.generatedImage}><img src={result.image.assetUri} alt="AI 生成并完成中文信息排版的商品主图"/><div className={styles.imageNotes}>{result.image.warnings.map((warning)=><p key={warning}><ShieldCheck size={13}/>{warning}</p>)}<details><summary>查看本次图片提示词</summary><pre>{result.image.prompt}</pre></details></div></div>:result.video&&result.artifactId?<div className={styles.generatedImage}><video controls playsInline preload="none" src={`/api/v1/artifacts/${result.artifactId}/export?format=mp4`} style={{width:"100%",maxHeight:620,background:"#111",borderRadius:16}}/><div className={styles.imageNotes}><p><ShieldCheck size={13}/>首次打开会由服务器逐帧渲染真实 MP4；完成后可以下载同一文件。</p><p><Download size={13}/><a href={`/api/v1/artifacts/${result.artifactId}/export?format=srt`}>下载 SRT 字幕</a> · <a href={`/api/v1/artifacts/${result.artifactId}/export?format=png`}>下载 PNG 封面</a></p></div></div>:<pre>{result.content}</pre>}</article>
+        <article className={styles.output}><div className={styles.outputToolbar}><div className={styles.outputIdentity}><span>{selectedTask.label}</span><small><Bot size={12}/>{providerDisplayName(result.provider, result.live)} · {result.model}</small></div><div className={styles.outputActions}><a className={styles.downloadLink} href={result.artifactId?`/api/v1/artifacts/${result.artifactId}/export`:`/api/v1/projects/${initial.projectId}/export`}><Download size={13}/>{result.bundleCount?"下载全部":result.image?"下载原图":result.video?"下载 MP4":"下载结果"}</a>{!result.image&&!result.video&&<button type="button" onClick={copyResult}><Clipboard size={13}/>{copied?"已复制":"复制结果"}</button>}</div></div>{result.image?<div className={styles.generatedImage}><img src={result.image.assetUri} alt="AI 生成并完成中文信息排版的商品主图"/><div className={styles.imageNotes}><p><ShieldCheck size={13}/>中文字体：{result.image.overlayFont||"Noto Sans SC"}；底图文字检查：{result.image.typographyQa==="passed"?"本地 OCR 已通过":"无需检查"}</p>{result.image.warnings.map((warning)=><p key={warning}><ShieldCheck size={13}/>{warning}</p>)}<details><summary>查看本次图片提示词</summary><pre>{result.image.prompt}</pre></details></div></div>:result.video&&result.artifactId?<div className={styles.generatedImage}><video controls playsInline preload="none" src={`/api/v1/artifacts/${result.artifactId}/export?format=mp4`} style={{width:"100%",maxHeight:620,background:"#111",borderRadius:16}}/><div className={styles.imageNotes}><p><ShieldCheck size={13}/>首次打开会由服务器逐帧渲染真实 MP4；完成后可以下载同一文件。</p><p><Download size={13}/><a href={`/api/v1/artifacts/${result.artifactId}/export?format=srt`}>下载 SRT 字幕</a> · <a href={`/api/v1/artifacts/${result.artifactId}/export?format=png`}>下载 PNG 封面</a></p></div></div>:<pre>{result.content}</pre>}</article>
         <aside className={styles.evidence}><h3>AI 这次依据了什么</h3><div className={styles.evidenceRow}><span>创作方式</span><strong>{result.generationMode === "creative" ? "自由创作" : "资料驱动"}</strong></div><div className={styles.evidenceRow}><span>当前模型</span><strong>{providerDisplayName(result.provider, result.live)}</strong></div><div className={styles.evidenceRow}><span>专业技能</span><strong>{result.skills.length} 个</strong></div><div className={styles.evidenceRow}><span>已确认事实</span><strong>{result.facts.length} 条</strong></div><div className={styles.evidenceRow}><span>引用资料</span><strong>{result.sources.length} 份</strong></div><div className={styles.evidenceRow}><span>待确认</span><strong>{result.missing.length} 项</strong></div>{result.skills.length>0&&<div className={styles.skillList}>{result.skills.join(" · ")}</div>}{result.missing.length>0&&<div className={styles.missingBox}>{result.missing.join("；")}</div>}<Link className={styles.projectLink} href={`/projects/${initial.projectId}`}>打开完整项目 <ChevronRight size={13}/></Link></aside>
       </div>
     </section>}
