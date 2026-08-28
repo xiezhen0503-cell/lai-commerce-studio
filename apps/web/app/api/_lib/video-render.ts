@@ -136,14 +136,18 @@ export async function inspectPlayableMp4(filePath: string, throwOnFailure = fals
   return qa;
 }
 
-export function getVideoRendererStatus() {
-  const browserRoots = [
-    path.resolve(process.cwd(), "node_modules", ".remotion", "chrome-headless-shell", "VERSION"),
-    path.resolve(process.cwd(), "..", "..", "node_modules", ".remotion", "chrome-headless-shell", "VERSION")
-  ];
+export async function getVideoRendererStatus() {
   let entryPointReady = true;
   try { resolveEntryPoint(); } catch { entryPointReady = false; }
-  const browserInstalled = browserRoots.some((candidate) => fsSync.existsSync(candidate));
+  let browserInstalled = false;
+  let browserError: string | null = null;
+  try {
+    const executable = await browserExecutable();
+    browserInstalled = fsSync.existsSync(executable);
+    if (!browserInstalled) browserError = "Remotion 返回的浏览器可执行文件不存在";
+  } catch (error) {
+    browserError = error instanceof Error ? error.message : String(error);
+  }
   let chineseFontInstalled = false;
   try { chineseFontInstalled = fsSync.existsSync(path.join(resolvePublicDirectory(), "fonts", "NotoSansSC-400.ttf")); } catch { /* reported as false */ }
   return {
@@ -151,6 +155,7 @@ export function getVideoRendererStatus() {
     live: entryPointReady && browserInstalled && chineseFontInstalled,
     entryPointReady,
     browserInstalled,
+    browserError,
     chineseFontInstalled,
     runtimeVerified: globalThis.__laiVideoRendererVerified === true,
     preview: true,

@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import { describe, expect, test } from "vitest";
-import { inspectPlayableMp4, renderCommercePoster, renderCommerceVideo } from "../../apps/web/app/api/_lib/video-render";
+import { getVideoRendererStatus, inspectPlayableMp4, renderCommercePoster, renderCommerceVideo } from "../../apps/web/app/api/_lib/video-render";
 
 const runRealRender = process.env.RUN_VIDEO_RENDER_TESTS === "true";
 
@@ -24,8 +24,10 @@ describe.skipIf(!runRealRender)("真实视频渲染验收", () => {
     const posterPath = await renderCommercePoster(spec);
     const qa = await inspectPlayableMp4(videoPath);
     const poster = await fs.readFile(posterPath);
+    const status = await getVideoRendererStatus();
 
     expect(qa).toMatchObject({ passed: true, hasFtyp: true, hasMovieIndex: true, hasMediaData: true, hasH264Track: true });
     expect(poster.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    expect(status).toMatchObject({ live: true, entryPointReady: true, browserInstalled: true, chineseFontInstalled: true, runtimeVerified: true });
   }, 180_000);
 });
