@@ -2,5 +2,5 @@
   "name":"@lai/mcp-server","version":"0.1.0","private":true,"type":"module",
   "scripts":{"dev":"tsx watch src/index.ts","build":"tsc -p tsconfig.json --noEmit","start":"tsx src/index.ts","typecheck":"tsc -p tsconfig.json --noEmit","smoke":"tsx src/smoke.ts"},
   "dependencies":{"@lai/shared":"workspace:*","@lai/permissions":"workspace:*","@modelcontextprotocol/sdk":"latest","cors":"latest","express":"latest","zod":"latest"},
-  "devDependencies":{"@types/cors":"latest","@types/express":"latest","tsx":"latest","typescript":"6.0.2"}
+  "devDependencies":{"@types/cors":"latest","@types/express":"latest","tsx":"latest","typescript":"7.0.2"}
 }
