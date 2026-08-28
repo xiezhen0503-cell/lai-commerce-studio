@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState, type ChangeEvent } from "react";
+import { useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { ArrowRight, Bot, Check, ChevronRight, Clipboard, Download, FileCheck2, FileText, Film, Image as ImageIcon, Layers3, LoaderCircle, Package, Paperclip, ShieldCheck, Sparkles, WandSparkles } from "lucide-react";
 import styles from "./beginner-workbench.module.css";
 
@@ -26,7 +26,7 @@ type WorkbenchResponse = {
     };
     result?: {
       artifact: { id: string; type: string; title: string; version: { content: string } };
-      run: { provider: string; model: string };
+      run: { provider: string; model: string; qualityScore?: number };
     };
     bundle?: { artifactIds?: string[]; provider?: string; model?: string };
   };
@@ -103,6 +103,72 @@ function creativeProviderHint(mode: InitialContext["ai"]["mode"]) {
   if (mode === "openrouter" || mode === "pollinations") return "免费测试模型会直接创作；具体商品事实统一标为待确认";
   if (mode === "openai") return "Codex 会直接创作；具体商品事实统一标为待确认";
   return "演示 AI 会直接创作；配置服务端密钥后切换真实模型";
+}
+
+function inlineMarkdown(value: string) {
+  return value.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean).map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**")) return <strong key={`${index}-${part}`}>{part.slice(2, -2)}</strong>;
+    if (part.startsWith("`") && part.endsWith("`")) return <code key={`${index}-${part}`}>{part.slice(1, -1)}</code>;
+    return <span key={`${index}-${part}`}>{part}</span>;
+  });
+}
+
+function markdownTableCells(line: string) {
+  return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+}
+
+function isMarkdownTableSeparator(line: string) {
+  const cells = markdownTableCells(line);
+  return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function MarkdownArtifact({ content }: { content: string }) {
+  const lines = content.replace(/\r\n?/g, "\n").split("\n");
+  const blocks: ReactNode[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index]?.trim() || "";
+    if (!line) { index += 1; continue; }
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      const text = inlineMarkdown(heading[2] || "");
+      if (heading[1]?.length === 1) blocks.push(<h1 key={`heading-${index}`}>{text}</h1>);
+      else if (heading[1]?.length === 2) blocks.push(<h2 key={`heading-${index}`}>{text}</h2>);
+      else blocks.push(<h3 key={`heading-${index}`}>{text}</h3>);
+      index += 1;
+      continue;
+    }
+    if (line.includes("|") && isMarkdownTableSeparator(lines[index + 1] || "")) {
+      const headers = markdownTableCells(line);
+      const rows: string[][] = [];
+      index += 2;
+      while (index < lines.length && (lines[index] || "").trim().includes("|")) {
+        rows.push(markdownTableCells(lines[index] || ""));
+        index += 1;
+      }
+      blocks.push(<div className={styles.markdownTableWrap} key={`table-${index}`}><table><thead><tr>{headers.map((cell, cellIndex) => <th key={`head-${cellIndex}`}>{inlineMarkdown(cell)}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={`row-${rowIndex}`}>{headers.map((_, cellIndex) => <td key={`cell-${rowIndex}-${cellIndex}`}>{inlineMarkdown(row[cellIndex] || "")}</td>)}</tr>)}</tbody></table></div>);
+      continue;
+    }
+    if (/^[-*]\s+/.test(line)) {
+      const items: string[] = [];
+      while (index < lines.length && /^[-*]\s+/.test((lines[index] || "").trim())) {
+        items.push((lines[index] || "").trim().replace(/^[-*]\s+/, ""));
+        index += 1;
+      }
+      blocks.push(<ul key={`list-${index}`}>{items.map((item, itemIndex) => <li key={`item-${itemIndex}`}>{inlineMarkdown(item)}</li>)}</ul>);
+      continue;
+    }
+    const paragraph: string[] = [line];
+    index += 1;
+    while (index < lines.length) {
+      const next = (lines[index] || "").trim();
+      if (!next || /^(?:#{1,3}\s+|[-*]\s+)/.test(next) || (next.includes("|") && isMarkdownTableSeparator(lines[index + 1] || ""))) break;
+      paragraph.push(next);
+      index += 1;
+    }
+    blocks.push(<p key={`paragraph-${index}`}>{inlineMarkdown(paragraph.join(" "))}</p>);
+  }
+  return <div className={styles.markdownResult}>{blocks}</div>;
 }
 
 export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
@@ -192,7 +258,7 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
       const generated = json.data.result;
       if (!generated) { setError("内容没有生成成功，请再试一次"); return; }
       const image = generated.artifact.type === "image" ? imageResult(generated.artifact.version.content) : undefined;
-      setResult({title:generated.artifact.title,content:generated.artifact.version.content,score:prompt.evaluation.total,sources:prompt.explanation.sources,facts:prompt.explanation.confirmedFacts,missing:prompt.explanation.missing,artifactId:generated.artifact.id,provider:generated.run.provider,model:generated.run.model,live:generated.run.model!=="mock-text-v1"&&generated.run.model!=="deterministic-storyboard-svg-v1",image,video:generated.artifact.type==="video",generationMode,skills:activeSkills});
+      setResult({title:generated.artifact.title,content:generated.artifact.version.content,score:generated.run.qualityScore ?? prompt.evaluation.total,sources:prompt.explanation.sources,facts:prompt.explanation.confirmedFacts,missing:prompt.explanation.missing,artifactId:generated.artifact.id,provider:generated.run.provider,model:generated.run.model,live:generated.run.model!=="mock-text-v1"&&generated.run.model!=="deterministic-storyboard-svg-v1",image,video:generated.artifact.type==="video",generationMode,skills:activeSkills});
     }
     setTimeout(() => resultRef.current?.scrollIntoView({behavior:"smooth",block:"start"}),50);
   }
@@ -266,9 +332,9 @@ export function BeginnerWorkbench({ initial }: { initial: InitialContext }) {
     </section>
 
     {result && <section className={styles.result} ref={resultRef} aria-live="polite">
-      <div className={styles.resultHead}><div><div className={styles.resultEyebrow}><Check size={13}/> 第一版已完成</div><h2>{result.title}</h2><p>{result.bundleCount ? `共整理 ${result.bundleCount} 项内容，已放入当前项目。` : result.image ? "真实图片底图已经过文字质检，中文由程序使用内置字体排版，可预览和下载原图。" : "你可以直接复制，也可以进入完整工作台继续修改。"}</p></div><div className={styles.score}><strong>{result.score}</strong><span>任务完整度</span></div></div>
+      <div className={styles.resultHead}><div><div className={styles.resultEyebrow}><Check size={13}/> 第一版已完成</div><h2>{result.title}</h2><p>{result.bundleCount ? `共整理 ${result.bundleCount} 项内容，已放入当前项目。` : result.image ? "真实图片底图已经过文字质检，中文由程序使用内置字体排版，可预览和下载原图。" : selectedTask.id === "script" ? "时间轴、画面、口播、字幕、开场版本和拍摄清单已经过完整性检查。" : "你可以直接复制，也可以进入完整工作台继续修改。"}</p></div><div className={styles.score}><strong>{result.score}</strong><span>成果质量分</span></div></div>
       <div className={styles.resultBody}>
-        <article className={styles.output}><div className={styles.outputToolbar}><div className={styles.outputIdentity}><span>{selectedTask.label}</span><small><Bot size={12}/>{providerDisplayName(result.provider, result.live)} · {result.model}</small></div><div className={styles.outputActions}><a className={styles.downloadLink} href={result.artifactId?`/api/v1/artifacts/${result.artifactId}/export`:`/api/v1/projects/${initial.projectId}/export`}><Download size={13}/>{result.bundleCount?"下载全部":result.image?"下载原图":result.video?"下载 MP4":"下载结果"}</a>{!result.image&&!result.video&&<button type="button" onClick={copyResult}><Clipboard size={13}/>{copied?"已复制":"复制结果"}</button>}</div></div>{result.image?<div className={styles.generatedImage}><img src={result.image.assetUri} alt="AI 生成并完成中文信息排版的商品主图"/><div className={styles.imageNotes}><p><ShieldCheck size={13}/>中文字体：{result.image.overlayFont||"Noto Sans SC"}；底图文字检查：{result.image.typographyQa==="passed"?"本地 OCR 已通过":"无需检查"}</p>{result.image.warnings.map((warning)=><p key={warning}><ShieldCheck size={13}/>{warning}</p>)}<details><summary>查看本次图片提示词</summary><pre>{result.image.prompt}</pre></details></div></div>:result.video&&result.artifactId?<div className={styles.generatedImage}><video controls playsInline preload="none" src={`/api/v1/artifacts/${result.artifactId}/export?format=mp4`} style={{width:"100%",maxHeight:620,background:"#111",borderRadius:16}}/><div className={styles.imageNotes}><p><ShieldCheck size={13}/>首次打开会由服务器逐帧渲染真实 MP4；完成后可以下载同一文件。</p><p><Download size={13}/><a href={`/api/v1/artifacts/${result.artifactId}/export?format=srt`}>下载 SRT 字幕</a> · <a href={`/api/v1/artifacts/${result.artifactId}/export?format=png`}>下载 PNG 封面</a></p></div></div>:<pre>{result.content}</pre>}</article>
+        <article className={styles.output}><div className={styles.outputToolbar}><div className={styles.outputIdentity}><span>{selectedTask.label}</span><small><Bot size={12}/>{providerDisplayName(result.provider, result.live)} · {result.model}</small></div><div className={styles.outputActions}><a className={styles.downloadLink} href={result.artifactId?`/api/v1/artifacts/${result.artifactId}/export`:`/api/v1/projects/${initial.projectId}/export`}><Download size={13}/>{result.bundleCount?"下载全部":result.image?"下载原图":result.video?"下载 MP4":"下载结果"}</a>{!result.image&&!result.video&&<button type="button" onClick={copyResult}><Clipboard size={13}/>{copied?"已复制":"复制结果"}</button>}</div></div>{result.image?<div className={styles.generatedImage}><img src={result.image.assetUri} alt="AI 生成并完成中文信息排版的商品主图"/><div className={styles.imageNotes}><p><ShieldCheck size={13}/>中文字体：{result.image.overlayFont||"Noto Sans SC"}；底图文字检查：{result.image.typographyQa==="passed"?"本地 OCR 已通过":"无需检查"}</p>{result.image.warnings.map((warning)=><p key={warning}><ShieldCheck size={13}/>{warning}</p>)}<details><summary>查看本次图片提示词</summary><pre>{result.image.prompt}</pre></details></div></div>:result.video&&result.artifactId?<div className={styles.generatedImage}><video controls playsInline preload="none" src={`/api/v1/artifacts/${result.artifactId}/export?format=mp4`} style={{width:"100%",maxHeight:620,background:"#111",borderRadius:16}}/><div className={styles.imageNotes}><p><ShieldCheck size={13}/>首次打开会由服务器逐帧渲染真实 MP4；完成后可以下载同一文件。</p><p><Download size={13}/><a href={`/api/v1/artifacts/${result.artifactId}/export?format=srt`}>下载 SRT 字幕</a> · <a href={`/api/v1/artifacts/${result.artifactId}/export?format=png`}>下载 PNG 封面</a></p></div></div>:<MarkdownArtifact content={result.content}/>}</article>
         <aside className={styles.evidence}><h3>AI 这次依据了什么</h3><div className={styles.evidenceRow}><span>创作方式</span><strong>{result.generationMode === "creative" ? "自由创作" : "资料驱动"}</strong></div><div className={styles.evidenceRow}><span>当前模型</span><strong>{providerDisplayName(result.provider, result.live)}</strong></div><div className={styles.evidenceRow}><span>专业技能</span><strong>{result.skills.length} 个</strong></div><div className={styles.evidenceRow}><span>已确认事实</span><strong>{result.facts.length} 条</strong></div><div className={styles.evidenceRow}><span>引用资料</span><strong>{result.sources.length} 份</strong></div><div className={styles.evidenceRow}><span>待确认</span><strong>{result.missing.length} 项</strong></div>{result.skills.length>0&&<div className={styles.skillList}>{result.skills.join(" · ")}</div>}{result.missing.length>0&&<div className={styles.missingBox}>{result.missing.join("；")}</div>}<Link className={styles.projectLink} href={`/projects/${initial.projectId}`}>打开完整项目 <ChevronRight size={13}/></Link></aside>
       </div>
     </section>}

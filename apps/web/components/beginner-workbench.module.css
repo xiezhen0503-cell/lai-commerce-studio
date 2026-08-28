@@ -150,6 +150,21 @@
 .outputActions { display: flex; align-items: center; gap: 6px; }
 .outputToolbar button,.downloadLink { display: inline-flex; align-items: center; gap: 5px; padding: 6px 8px; border: 1px solid #dedfe8; border-radius: 8px; color: #5b5e71; background: white; font-size: 8px; }
 .output pre { max-height: 560px; margin: 0; padding: 22px; overflow: auto; white-space: pre-wrap; color: #34344b; font: 11px/1.9 ui-monospace,"Cascadia Code",monospace; }
+.markdownResult { max-height: 650px; padding: 24px; overflow: auto; color: #34344b; font-size: 11px; line-height: 1.8; }
+.markdownResult h1 { margin: 0 0 18px; color: var(--night); font-size: 21px; line-height: 1.35; }
+.markdownResult h2 { margin: 26px 0 12px; padding-bottom: 8px; border-bottom: 1px solid #e8e8f0; color: #302d72; font-size: 15px; }
+.markdownResult h3 { margin: 18px 0 8px; color: #45408d; font-size: 12px; }
+.markdownResult p { margin: 9px 0; }
+.markdownResult ul { display: grid; gap: 5px; margin: 8px 0 14px; padding-left: 20px; }
+.markdownResult strong { color: #25234f; }
+.markdownResult code { padding: 2px 5px; border-radius: 5px; color: #4c4899; background: #efedff; font: 700 9px ui-monospace,monospace; }
+.markdownTableWrap { margin: 12px 0 20px; overflow-x: auto; border: 1px solid #dedfe9; border-radius: 12px; }
+.markdownResult table { width: 100%; min-width: 760px; border-collapse: collapse; background: white; }
+.markdownResult th,.markdownResult td { padding: 10px 11px; text-align: left; vertical-align: top; border-right: 1px solid #ececf2; border-bottom: 1px solid #ececf2; }
+.markdownResult th:last-child,.markdownResult td:last-child { border-right: 0; }
+.markdownResult tbody tr:last-child td { border-bottom: 0; }
+.markdownResult th { color: #383474; background: #f1f0ff; font-size: 9px; white-space: nowrap; }
+.markdownResult td { min-width: 112px; color: #4c4d60; font-size: 9px; line-height: 1.65; }
 .generatedImage { padding: 18px; background: #f7f7fb; }
 .generatedImage > img { display: block; width: min(100%,680px); margin: 0 auto; border-radius: 16px; background: white; box-shadow: 0 16px 38px rgba(35,32,93,.13); }
 .imageNotes { width: min(100%,680px); margin: 14px auto 0; }

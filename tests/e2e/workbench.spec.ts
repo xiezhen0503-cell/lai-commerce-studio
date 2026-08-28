@@ -58,10 +58,19 @@ test("新手工作台可以从一句话生成第一版内容", async ({ page }) 
   await page.getByLabel("用一句话说说你的要求").fill("为草莓燕麦杯做一份 7 天新品上市方案，价格未确认时必须留空");
   await page.getByRole("button", { name: "帮我生成第一版" }).click();
   await expect(page.getByText("第一版已完成", { exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "新品上市方案" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "新品上市方案", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "AI 这次依据了什么" })).toBeVisible();
   await expect(page.getByRole("link", { name: "下载结果" })).toBeVisible();
   await expect(page.getByRole("button", { name: "复制结果" })).toBeVisible();
+
+  await page.getByRole("button", { name: /短视频脚本/ }).click();
+  await page.getByLabel("用一句话说说你的要求").fill("写一条 30 秒短视频脚本，必须包含画面、口播、字幕和三个开场版本");
+  await page.getByRole("button", { name: "帮我生成第一版" }).click();
+  await expect(page.getByRole("heading", { name: "A/B/C 前 3 秒开场" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "30 秒逐镜头脚本" })).toBeVisible();
+  await expect(page.getByRole("table")).toBeVisible();
+  await expect(page.getByText("成果质量分", { exact: true })).toBeVisible();
+  await expect(page.getByText("executiveSummary", { exact: true })).toHaveCount(0);
 
   await page.getByRole("button", { name: /AI 商品图/ }).click();
   await page.getByLabel("用一句话说说你的要求").fill("生成一张方形商品主图，不要编造价格、规格和功效文字");
@@ -85,8 +94,9 @@ test("新手工作台可以从一句话生成第一版内容", async ({ page }) 
 
 test("项目事实和 API 文档页面可访问", async ({ page }) => {
   await page.goto(accessPath);
-  await page.goto("/projects/prj_qingmai_launch");
-  await expect(page.getByRole("heading", { name: "青麦脆夏日上新" })).toBeVisible();
+  const projectId = await createIsolatedProject(page, `事实与接口-${Date.now()}`);
+  await page.goto(`/projects/${projectId}`);
+  await expect(page.getByRole("heading", { name: /商业 Demo 验收 事实与接口/ })).toBeVisible();
   const uploadResponse = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/sources"));
   await page.getByLabel("上传项目资料").setInputFiles(path.resolve("tests/fixtures/e2e-product-sheet.md"));
   expect((await uploadResponse).ok()).toBeTruthy();

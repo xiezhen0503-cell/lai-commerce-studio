@@ -216,6 +216,65 @@ function firstMeaningfulLine(markdown: string, fallback: string) {
   return markdown.split(/\r?\n/).map((line) => line.replace(/^#+\s*/, "").replace(/^[-*]\s*/, "").trim()).find((line) => line.length >= 4)?.slice(0, 32) || fallback;
 }
 
+export type VideoScriptQa = {
+  passed: boolean;
+  score: number;
+  issues: string[];
+  characterCount: number;
+  timelineSegments: number;
+  timelineEndSeconds: number;
+  openingVariants: number;
+};
+
+export function inspectVideoScriptArtifact(content: string, targetDurationSeconds = 30): VideoScriptQa {
+  const normalized = content.replace(/\r\n?/g, "\n").trim();
+  const characterCount = normalized.replace(/[\s|#*_`>-]/g, "").length;
+  const timelineRanges = Array.from(normalized.matchAll(/(?:^|[\s|])([0-5]?\d)(?::([0-5]\d))?\s*(?:[-–—~至])\s*([0-5]?\d)(?::([0-5]\d))?\s*(?:秒|s)?(?=\s|[|，,。；;]|$)/gim));
+  const toSeconds = (minutes: string | undefined, seconds: string | undefined) => seconds === undefined ? Number(minutes || 0) : Number(minutes || 0) * 60 + Number(seconds || 0);
+  const timelineEndSeconds = timelineRanges.reduce((maximum, match) => Math.max(maximum, toSeconds(match[3], match[4])), 0);
+  const openingVariants = normalized.split("\n").filter((line) => /^(?:\s*#+\s*)?(?:[-*]\s*)?(?:开场\s*)?(?:[ABC]|[一二三])(?:版|方案)?[\s：:、.)）]/i.test(line)).length;
+  const hasVisual = /画面|镜头|景别|场景/.test(normalized);
+  const hasSpoken = /口播|台词|旁白/.test(normalized);
+  const hasSubtitle = /字幕|屏幕文字|屏显/.test(normalized);
+  const hasHook = /前\s*3\s*秒|0\s*(?:[-–—~至])\s*3\s*(?:秒|s)?|钩子/.test(normalized);
+  const hasProductionNotes = /拍摄清单|拍摄提示|道具|素材清单|执行提示/.test(normalized);
+  const hasConfirmationBoundary = /待确认|发布前确认|事实边界|创意假设/.test(normalized);
+  const timelineSegments = timelineRanges.length;
+  const issues: string[] = [];
+  if (characterCount < 320) issues.push("正文过短，不足以支撑可拍摄脚本");
+  if (timelineSegments < 5) issues.push("时间轴少于 5 个镜头段落");
+  if (timelineEndSeconds < targetDurationSeconds - 1) issues.push(`时间轴没有覆盖到 ${targetDurationSeconds} 秒`);
+  if (!hasVisual) issues.push("缺少画面或镜头说明");
+  if (!hasSpoken) issues.push("缺少口播、台词或旁白");
+  if (!hasSubtitle) issues.push("缺少字幕或屏幕文字");
+  if (!hasHook) issues.push("缺少前 3 秒钩子");
+  if (openingVariants < 3) issues.push("缺少 3 个 A/B/C 开场版本");
+  if (!hasProductionNotes) issues.push("缺少拍摄或素材执行说明");
+  if (!hasConfirmationBoundary) issues.push("缺少创意假设或发布前待确认项");
+  const score = Math.min(100,
+    Math.min(15, Math.round(characterCount / 320 * 15)) +
+    Math.min(20, timelineSegments * 4) +
+    (timelineEndSeconds >= targetDurationSeconds - 1 ? 10 : 0) +
+    (hasVisual ? 8 : 0) +
+    (hasSpoken ? 8 : 0) +
+    (hasSubtitle ? 8 : 0) +
+    (hasHook ? 7 : 0) +
+    Math.min(9, openingVariants * 3) +
+    (hasProductionNotes ? 7 : 0) +
+    (hasConfirmationBoundary ? 8 : 0));
+  return { passed: issues.length === 0, score, issues, characterCount, timelineSegments, timelineEndSeconds, openingVariants };
+}
+
+function videoScriptOutputFormat(targetDurationSeconds: number) {
+  return `只输出中文 Markdown 成品，不要输出 JSON，不要出现 executiveSummary、strategy、deliverables、evidence、risks 等程序字段。严格按以下顺序完整输出：
+1. 标题与创意主线。
+2. “A/B/C 前 3 秒开场”：必须有 A、B、C 三个不同版本，每个都写画面、口播和字幕。
+3. “${targetDurationSeconds} 秒逐镜头脚本”：使用 Markdown 表格，表头必须为“时间｜画面/景别｜人物动作｜口播/台词｜字幕/屏幕文字｜商品展示/事实边界”；至少 5 个连续时间段，从 0 秒覆盖到 ${targetDurationSeconds} 秒。
+4. “拍摄与素材清单”：列出场景、道具、景别、转场或声音要求。
+5. “创意假设与发布前待确认”：价格、规格、配料、产地、资质、功效、活动日期等没有证据的事实必须逐项写待确认。
+最终内容必须能直接交给拍摄人员执行，不能只给摘要、项目名、提纲或空表格。`;
+}
+
 function activeSkillsForTask(taskType: string, generationMode: GenerationMode) {
   const primary = taskType === "short-video-script"
     ? "ecommerce-script-writer"
@@ -539,19 +598,34 @@ export class CommerceService {
     const context = this.makeCompileContext(projectId, spec.objective, generationModeFor(spec)); context.spec = spec;
     if (artifactType === "image") return this.runImagePrompt(projectId, promptSpecId, context);
     const structured = ["storyboard", "video-storyboard", "schedule", "handoff"].includes(artifactType);
-    const taskLabel = this.titleForArtifact(artifactType);
+    const scriptDuration = /(?:^|\D)15\s*秒/.test(spec.objective) ? 15 : 30;
+    const taskLabel = artifactType === "script" ? `${scriptDuration}秒短视频脚本` : this.titleForArtifact(artifactType);
+    const deliverables = artifactType === "script"
+      ? [
+          "3 个可替换的 A/B/C 前 3 秒开场，每个包含画面、口播和字幕",
+          `一份从 0 秒覆盖到 ${scriptDuration} 秒、至少 5 段的逐镜头脚本`,
+          "每段完整写出画面/景别、人物动作、口播/台词、字幕/屏幕文字和商品展示/事实边界",
+          "拍摄与素材清单",
+          "创意假设与发布前待确认清单"
+        ]
+      : [taskLabel];
     const modelSpec = PromptSpecSchema.parse({
       ...spec,
       objective: `${spec.objective}\n\n本次只生成：${taskLabel}。不要输出其他交付物。`,
-      deliverables: [taskLabel],
-      outputFormat: structured ? "只返回严格 JSON，不要 Markdown 代码围栏；数组中每一项必须字段完整，可直接导出为表格。" : "使用中文 Markdown，直接给可使用的完整成果，并标注事实来源与待确认项。"
+      deliverables,
+      outputFormat: artifactType === "script"
+        ? videoScriptOutputFormat(scriptDuration)
+        : structured
+          ? "只返回严格 JSON，不要 Markdown 代码围栏；数组中每一项必须字段完整，可直接导出为表格。"
+          : "使用中文 Markdown，直接给可使用的完整成果，并标注事实来源与待确认项。"
     });
     context.spec = modelSpec;
     const prompt = compilePrompt(context, "markdown");
     const started = Date.now();
     const textProvider = providerRegistry.text;
-    const generated = await textProvider.generate(modelSpec, prompt);
-    const content = generated.model === "mock-text-v1" && artifactType === "script"
+    let generated = await textProvider.generate(modelSpec, prompt);
+    let totalTokenUsage = generated.tokenUsage;
+    let content = generated.model === "mock-text-v1" && artifactType === "script"
       ? this.mockScript(context)
       : generated.model === "mock-text-v1" && (artifactType === "storyboard" || artifactType === "video-storyboard")
         ? JSON.stringify(this.mockStoryboard(context, artifactType === "video-storyboard"), null, 2)
@@ -560,8 +634,22 @@ export class CommerceService {
           : structured
             ? this.requireUsableJson(generated.text, taskLabel)
             : generated.text;
-    const artifact = this.createArtifact(projectId, artifactType, this.titleForArtifact(artifactType), content, context.snapshot.id, promptSpecId, { type: "platform-ai", id: generated.model });
-    const run = { id: newId("run"), promptVersionId: promptSpecId, provider: textProvider.name, model: generated.model, inputSnapshot: context.snapshot.id, factSnapshotId: context.snapshot.id, output: content, latency: Date.now() - started, tokenUsage: generated.tokenUsage, estimatedCost: 0, qualityScore: evaluatePrompt(spec, context.snapshot).total, errors: [], createdAt: nowIso(), updatedAt: nowIso() };
+    let scriptQa = artifactType === "script" ? inspectVideoScriptArtifact(content, scriptDuration) : undefined;
+    let generationAttempts = 1;
+    if (artifactType === "script" && scriptQa && !scriptQa.passed && generated.model !== "mock-text-v1") {
+      const correctionPrompt = `${prompt}\n\n## 上一版没有通过成果质量检查\n问题：${scriptQa.issues.join("；")}。\n请完全重写，不要解释失败原因，不要沿用残缺结构。必须严格完成 A/B/C 三个开场、至少 5 段并覆盖到 ${scriptDuration} 秒的时间轴、画面、动作、口播、字幕、商品展示/事实边界、拍摄清单和待确认项。\n\n<unusable_previous_draft>\n${content.slice(0, 6_000)}\n</unusable_previous_draft>`;
+      const retried = await textProvider.generate(modelSpec, correctionPrompt);
+      generated = retried;
+      totalTokenUsage += retried.tokenUsage;
+      content = retried.text.trim();
+      scriptQa = inspectVideoScriptArtifact(content, scriptDuration);
+      generationAttempts = 2;
+    }
+    if (artifactType === "script" && scriptQa && !scriptQa.passed) {
+      throw new CommerceError("MODEL_SCRIPT_INCOMPLETE", `免费测试模型连续两次没有返回可拍摄的${scriptDuration}秒脚本：${scriptQa.issues.join("；")}。系统没有把残缺摘要保存成成果，请重新生成。`, 502, scriptQa);
+    }
+    const artifact = this.createArtifact(projectId, artifactType, taskLabel, content, context.snapshot.id, promptSpecId, { type: "platform-ai", id: generated.model });
+    const run = { id: newId("run"), promptVersionId: promptSpecId, provider: textProvider.name, model: generated.model, inputSnapshot: context.snapshot.id, factSnapshotId: context.snapshot.id, output: content, latency: Date.now() - started, tokenUsage: totalTokenUsage, estimatedCost: 0, qualityScore: scriptQa?.score ?? evaluatePrompt(spec, context.snapshot).total, qualityGate: scriptQa ? { type: "video-script-v1", passed: scriptQa.passed, attempts: generationAttempts, issues: scriptQa.issues, metrics: scriptQa } : undefined, errors: [], createdAt: nowIso(), updatedAt: nowIso() };
     this.repo.save("prompt_runs", run, { workspaceId: DEMO_WORKSPACE_ID, projectId, parentId: promptSpecId });
     return { artifact, run };
   }
@@ -716,6 +804,7 @@ export class CommerceService {
       inputSnapshot: context.snapshot.id, factSnapshotId: context.snapshot.id,
       output: `已生成 1 张 1024×1024 图片，成果：${artifact.id}`, latency: Date.now() - started,
       tokenUsage: 0, estimatedCost: 0, qualityScore: evaluatePrompt(context.spec, context.snapshot).total,
+      qualityGate: { type: "image-typography-v2", passed: typographyQa?.passed !== false, attempts, issues: [] as string[], metrics: typographyQa },
       errors: [], createdAt: nowIso(), updatedAt: nowIso()
     };
     this.repo.save("prompt_runs", run, { workspaceId: DEMO_WORKSPACE_ID, projectId, parentId: promptSpecId });
@@ -726,7 +815,7 @@ export class CommerceService {
 
   mockScript(context: CompileContext) {
     const product = context.products[0]!;
-    return `# 30 秒短视频脚本｜${product.name}\n\n| 时间 | 画面 | 人物动作 | 口播 | 屏幕文字 | 来源 / 风险 |\n|---|---|---|---|---|---|\n| 0–3s | 通勤包里露出独立杯 | 拿出产品 | 早上又来不及？先别空着手出门。 | 一杯带走 | 创意场景 |\n| 3–10s | 包装原样特写 | 镜头沿背标移动 | 这杯先把配料写清楚：燕麦片、冻干草莓粒和乳粉。 | 配料看得懂 | ${context.sourceNames[0] || "事实卡"} |\n| 10–18s | 冲泡与搅拌 | 加水、搅拌 | ${product.specification}，独立杯装，办公桌上也好处理。 | ${product.specification} | 规格事实卡 |\n| 18–25s | 三个生活场景切换 | 早餐、午后、加班 | 不替你承诺神奇效果，只给忙碌的一天多一个具体选择。 | 不夸大，只讲清楚 | 合规表达 |\n| 25–30s | 商品卡与 CTA | 指向商品卡 | 活动价确认后再上屏。先看清配料，再决定要不要带走。 | 活动价：待确认 | 未确认价格不得发布 |\n`;
+    return `# 30 秒短视频脚本｜${product.name}\n\n## 创意主线\n用“忙碌早晨也要先看清商品信息”的生活冲突推进，不承诺未经证实的效果。\n\n## A/B/C 前 3 秒开场\n\n### A 版：时间冲突\n- 画面：闹钟、通勤包和商品快速切换。\n- 口播：早上又来不及？先别空着手出门。\n- 字幕：忙归忙，先看清楚。\n\n### B 版：配料好奇\n- 画面：包装背标微距推进。\n- 口播：买早餐之前，我会先翻到背面看这一行。\n- 字幕：先看配料，再做决定。\n\n### C 版：办公桌场景\n- 画面：电脑旁腾出一小块位置放下商品。\n- 口播：桌面很挤，但早餐不该只剩一句“算了”。\n- 字幕：给早晨一个具体选择。\n\n## 30 秒逐镜头脚本\n\n| 时间 | 画面/景别 | 人物动作 | 口播/台词 | 字幕/屏幕文字 | 商品展示/事实边界 |\n|---|---|---|---|---|---|\n| 0–3s | 通勤包里露出独立杯，近景 | 拿出产品 | 早上又来不及？先别空着手出门。 | 一杯带走 | 创意场景，不代表功效 |\n| 3–10s | 包装原样特写 | 镜头沿背标移动 | 这杯先把配料写清楚：燕麦片、冻干草莓粒和乳粉。 | 配料看得懂 | ${context.sourceNames[0] || "事实卡"} |\n| 10–18s | 冲泡与搅拌，俯拍 | 加水、搅拌 | ${product.specification}，独立杯装，办公桌上也好处理。 | ${product.specification} | 规格事实卡 |\n| 18–25s | 早餐、午后、加班三个生活场景切换 | 放到桌面并拿起杯子 | 不替你承诺神奇效果，只给忙碌的一天多一个具体选择。 | 不夸大，只讲清楚 | 合规表达 |\n| 25–30s | 商品卡与 CTA，中近景 | 指向商品卡 | 活动价确认后再上屏。先看清配料，再决定要不要带走。 | 活动价：待确认 | 未确认价格不得发布 |\n\n## 拍摄与素材清单\n- 场景：通勤玄关、办公桌；道具：闹钟、电脑、透明杯。\n- 景别：开场快切，中段包装微距与俯拍，结尾中近景；转场跟随人物拿放动作。\n- 声音：前 3 秒保留闹钟提示音，口播清楚，不使用夸张音效。\n\n## 创意假设与发布前待确认\n- 开场场景与人物状态属于创意假设。\n- 商品名称、规格、配料、活动价、活动时间和功效表述必须依据资料逐项确认；未确认字段继续显示“待确认”。\n`;
   }
 
   mockStoryboard(context: CompileContext, video = false) {
